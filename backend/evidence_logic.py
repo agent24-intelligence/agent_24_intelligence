@@ -207,6 +207,7 @@ def classify_link(
     *,
     similarity: float,
     technology_match: float,
+    use_case_match: float,
     latest_relation: str | None,
 ) -> str:
     if latest_relation == "does_not_use" and similarity >= LINK_THRESHOLDS["partial"]:
@@ -245,6 +246,7 @@ def make_cluster_link(
     link_type = classify_link(
         similarity=similarity,
         technology_match=dimensions["technology"],
+        use_case_match=dimensions["use_case"],
         latest_relation=adoption.latest_relation if adoption else None,
     )
     evidence_ids = list(research.evidence_ids)
@@ -279,19 +281,18 @@ def calculate_adoption_evidence(
     connected_orgs: set[str] = set()
     adjacent_orgs: set[str] = set()
     adjacent_cluster_ids: set[str] = set()
+    has_direct_link = False
     for link in links:
         if link.adoption_cluster_id is None or link.link_type not in {"direct", "partial"}:
             continue
         cluster = adoption_clusters.get(link.adoption_cluster_id)
         if not cluster or not cluster.subject:
             continue
-        # Partial links are adjacent evidence only. Counting them as adoption
-        # points makes recommendation/curation cases inflate exact classifier
-        # adoption scores.
         if link.link_type == "partial":
             adjacent_orgs.add(cluster.subject)
             adjacent_cluster_ids.add(cluster.cluster_id)
-            continue
+        else:
+            has_direct_link = True
         if cluster.usage_context == "vendor_product_integration":
             points = VENDOR_PRODUCT_INTEGRATION_POINTS
         else:
@@ -320,11 +321,14 @@ def calculate_adoption_evidence(
     breadth_bonus = {0: 0, 1: 0, 2: 8, 3: 15, 4: 20}.get(final_user_orgs, 25)
     base_score = min(sum(sorted(organization_scores.values(), reverse=True)[:3]), BASE_ADOPTION_MAX)
     total = min(round(base_score + breadth_bonus), 100)
+    if not has_direct_link:
+        total = min(total, LABEL_THRESHOLDS["gap_max_adoption"])
     return {
         "total": total,
         "signals": {
             "base_score": base_score,
             "breadth_bonus": breadth_bonus,
+            "partial_only_cap_applied": not has_direct_link and total > 0,
             "final_user_orgs": final_user_orgs,
             "direct_production_orgs": len(direct_production_orgs),
             "partial_production_orgs": len(partial_production_orgs),
