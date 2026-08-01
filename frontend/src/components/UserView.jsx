@@ -927,7 +927,7 @@ export default function UserView() {
               </span>
             </div>
             <div className={`score-card ${scoreClass(result.scores?.coverage_confidence, result.label)}`}>
-              <span className="score-label">판정 신뢰도</span>
+              <span className="score-label">판정 근거 충분도</span>
               <span className={`score-value ${scoreClass(result.scores?.coverage_confidence, result.label)}`}>
                 {typeof result.scores?.coverage_confidence === 'number' ? `${result.scores.coverage_confidence}%` : '-'}
               </span>
