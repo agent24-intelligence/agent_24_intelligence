@@ -194,6 +194,7 @@ function parseSynthesisMarkdown(text) {
   const lines = String(text || '').split(/\r?\n/)
   const blocks = []
   let paragraph = []
+  let list = null
 
   function flushParagraph() {
     const value = paragraph.join(' ').trim()
@@ -201,22 +202,85 @@ function parseSynthesisMarkdown(text) {
     paragraph = []
   }
 
+  function flushList() {
+    if (list?.items.length) blocks.push(list)
+    list = null
+  }
+
+  function pushListItem(ordered, text) {
+    flushParagraph()
+    if (!list || list.ordered !== ordered) {
+      flushList()
+      list = { type: 'list', ordered, items: [] }
+    }
+    list.items.push(text.trim())
+  }
+
   for (const rawLine of lines) {
     const line = rawLine.trim()
     if (!line) {
       flushParagraph()
+      flushList()
       continue
     }
     const heading = line.match(/^#{2,4}\s+(.+)$/)
     if (heading) {
       flushParagraph()
+      flushList()
       blocks.push({ type: 'heading', text: heading[1].trim() })
       continue
     }
+    const boldSection = line.match(/^\*\*([^*]+)\*\*\s*(.*)$/)
+    if (boldSection) {
+      flushParagraph()
+      flushList()
+      blocks.push({ type: 'heading', text: boldSection[1].trim() })
+      if (boldSection[2].trim()) blocks.push({ type: 'paragraph', text: boldSection[2].trim() })
+      continue
+    }
+    const unorderedItem = line.match(/^[-*•]\s+(.+)$/)
+    if (unorderedItem) {
+      pushListItem(false, unorderedItem[1])
+      continue
+    }
+    const orderedItem = line.match(/^\d+[.)]\s+(.+)$/)
+    if (orderedItem) {
+      pushListItem(true, orderedItem[1])
+      continue
+    }
+    flushList()
     paragraph.push(line)
   }
   flushParagraph()
+  flushList()
   return blocks
+}
+
+function renderInlineMarkdown(text, keyPrefix) {
+  const source = String(text || '')
+  const parts = []
+  const pattern = /\*\*([^*\n]+)\*\*|`([^`\n]+)`|\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g
+  let lastIndex = 0
+  let match
+
+  while ((match = pattern.exec(source)) !== null) {
+    if (match.index > lastIndex) parts.push(source.slice(lastIndex, match.index))
+    if (match[1]) {
+      parts.push(<strong key={`${keyPrefix}-bold-${match.index}`}>{match[1]}</strong>)
+    } else if (match[2]) {
+      parts.push(<code key={`${keyPrefix}-code-${match.index}`}>{match[2]}</code>)
+    } else if (match[3] && match[4]) {
+      parts.push(
+        <a key={`${keyPrefix}-link-${match.index}`} href={match[4]} target="_blank" rel="noreferrer">
+          {match[3]}
+        </a>,
+      )
+    }
+    lastIndex = pattern.lastIndex
+  }
+
+  if (lastIndex < source.length) parts.push(source.slice(lastIndex))
+  return parts.length > 0 ? parts : source
 }
 
 function FinalSynthesisText({ text, streaming }) {
@@ -230,18 +294,36 @@ function FinalSynthesisText({ text, streaming }) {
   }
   return (
     <>
-      {blocks.map((block, index) =>
-        block.type === 'heading' ? (
-          <h4 key={index} className="final-synthesis-section-title">
-            {block.text}
-          </h4>
-        ) : (
+      {blocks.map((block, index) => {
+        const isLastBlock = index === blocks.length - 1
+        if (block.type === 'heading') {
+          return (
+            <h4 key={index} className="final-synthesis-section-title">
+              {renderInlineMarkdown(block.text, `heading-${index}`)}
+              {streaming && isLastBlock && <span className="final-synthesis-cursor" />}
+            </h4>
+          )
+        }
+        if (block.type === 'list') {
+          const ListTag = block.ordered ? 'ol' : 'ul'
+          return (
+            <ListTag key={index} className="final-synthesis-list">
+              {block.items.map((item, itemIndex) => (
+                <li key={itemIndex}>
+                  {renderInlineMarkdown(item, `list-${index}-${itemIndex}`)}
+                  {streaming && isLastBlock && itemIndex === block.items.length - 1 && <span className="final-synthesis-cursor" />}
+                </li>
+              ))}
+            </ListTag>
+          )
+        }
+        return (
           <p key={index} className="final-synthesis-paragraph">
-            {block.text}
-            {streaming && index === blocks.length - 1 && <span className="final-synthesis-cursor" />}
+            {renderInlineMarkdown(block.text, `paragraph-${index}`)}
+            {streaming && isLastBlock && <span className="final-synthesis-cursor" />}
           </p>
-        ),
-      )}
+        )
+      })}
     </>
   )
 }
@@ -706,38 +788,6 @@ export default function UserView() {
       </div>
 
       <form className="user-view-form" onSubmit={runAnalyze}>
-        {/* 별도 줄/라벨/스위치 대신 입력창 옆 아이콘 버튼 하나로 — 폼의 일부처럼 보이게
-            해서 "설정 UI"가 튀지 않고 다른 아이콘 버튼들과 같은 언어로 자리잡게 한다. */}
-        <div className="user-view-fast-wrap">
-          {/* key를 매번 바꿔서 연속으로 빠르게 눌러도 DOM이 새로 마운트되고 애니메이션이
-              처음부터 재생되게 한다 — 텍스트만 바뀌면 이미 진행 중인 CSS 애니메이션이
-              재시작되지 않아 클릭 속도를 못 따라오는 문제가 있었다. */}
-          {fastModeNotice && (
-            <div key={fastModeNoticeKey} className="user-view-fast-toast">
-              {fastModeNotice}
-            </div>
-          )}
-          <button
-            type="button"
-            className={`user-view-fast-btn ${fastMode ? 'is-on' : ''}`}
-            onClick={() => {
-              setFastMode((value) => {
-                const next = !value
-                setFastModeNotice(next ? '빠른 모드 켜짐' : '빠른 모드 꺼짐')
-                setFastModeNoticeKey((k) => k + 1)
-                clearTimeout(fastModeNoticeTimer.current)
-                fastModeNoticeTimer.current = setTimeout(() => setFastModeNotice(null), 1600)
-                return next
-              })
-              setLastAnalyzedTopic(null)
-            }}
-            aria-pressed={fastMode}
-            disabled={status === 'running'}
-            title={fastMode ? '빠른 모드 켜짐 — 단계별 시간 제한 적용' : '빠른 모드 꺼짐 — 시간 제한 없이 전체 분석'}
-          >
-            <BoltIcon />
-          </button>
-        </div>
         <input
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
