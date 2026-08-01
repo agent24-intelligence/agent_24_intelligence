@@ -24,8 +24,9 @@ _TARGETS = {
         "auth_header": lambda: {"Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY', '')}"},
     },
     "liner": {
-        "base_url": os.environ.get("LINER_API_BASE_URL", "https://api.liner.com"),
-        "auth_header": lambda: {"Authorization": f"Bearer {os.environ.get('LINER_API_KEY', '')}"},
+        "base_url": os.environ.get("LINER_API_BASE_URL", "https://platform.liner.com"),
+        # Liner는 Authorization: Bearer가 아니라 x-api-key 헤더를 씀 (공식 문서 기준)
+        "auth_header": lambda: {"x-api-key": os.environ.get("LINER_API_KEY", "")},
     },
 }
 
