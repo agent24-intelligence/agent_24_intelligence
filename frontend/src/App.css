@@ -705,14 +705,17 @@
   letter-spacing: -0.1px;
 }
 
-/* 판정 결과별 톤 — 갭이 발견됐을 때만 포인트 컬러로 강조하고, 나머지는 무채색으로 정리 */
+/* 판정 결과별 톤 — 갭(=이번 분석에서 제일 중요한 발견)은 앰버로, 이미 해소된 건
+   그린으로, 판단 보류는 무채색으로. green-soft/red-soft가 이미 색을 쓰고 있던 것과
+   맞춰서 label-gap/label-weak도 "장식"이 아니라 "의미 신호"로 색을 되살렸다 —
+   같은 계열(앰버) 안에서 확정/약한 신호를 채움 대비로 구분한다. */
 .user-view-label.label-gap {
-  color: var(--accent-2);
-  background: var(--accent-soft);
+  color: var(--amber);
+  background: var(--amber-soft);
   border-color: transparent;
 }
 .user-view-label.label-weak {
-  color: var(--accent-2);
+  color: var(--amber);
   background: var(--surface-2);
   border-color: var(--border);
 }
