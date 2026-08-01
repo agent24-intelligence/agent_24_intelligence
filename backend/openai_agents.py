@@ -1,5 +1,6 @@
 """OpenAI Agents SDK steps used by the research pipeline."""
 
+import asyncio
 import json
 import os
 from typing import Any, Literal
@@ -12,6 +13,10 @@ from events import emit_event
 
 SMALL_MODEL = os.environ.get("OPENAI_SMALL_MODEL", "gpt-4o-mini")
 LARGE_MODEL = os.environ.get("OPENAI_LARGE_MODEL", "gpt-4o")
+
+
+class AgentBudgetTimeout(TimeoutError):
+    """An intentional per-stage budget expiry, distinct from a provider error."""
 
 
 class ScopeDecision(BaseModel):
@@ -42,9 +47,15 @@ class ScholarQueryResult(BaseModel):
     rationale: str
 
 
+class QueryFamilies(BaseModel):
+    technology: list[str] = Field(default_factory=list, max_length=3)
+    use_case: list[str] = Field(default_factory=list, max_length=3)
+    context: list[str] = Field(default_factory=list, max_length=3)
+
+
 class VocabularyBridgeResult(BaseModel):
     terms: list[str] = Field(min_length=1, max_length=3)
-    query_families: dict[str, list[str]] = Field(default_factory=dict)
+    query_families: QueryFamilies = Field(default_factory=QueryFamilies)
     mapping_confidence: float = Field(ge=0, le=1)
     rationale: str
 
@@ -286,15 +297,16 @@ class ResearchAgents:
             output_type=DeepResearchReviewResult,
         )
 
-    async def scope(self, topic: str) -> ScopeDecision:
+    async def scope(self, topic: str, *, timeout_s: float | None = None) -> ScopeDecision:
         return await self._run(
             self.scope_agent,
             topic,
             stage="scope_calibrator",
             purpose="scope decision",
+            timeout_s=timeout_s,
         )
 
-    async def preflight(self, topic: str) -> InputPreflightResult:
+    async def preflight(self, topic: str, *, timeout_s: float | None = None) -> InputPreflightResult:
         prompt = json.dumps(
             {
                 "topic": topic,
@@ -311,9 +323,10 @@ class ResearchAgents:
             prompt,
             stage="input_preflight",
             purpose="input validity and recommendation generation",
+            timeout_s=timeout_s,
         )
 
-    async def scholar_query(self, topic: str, scope: ScopeDecision) -> ScholarQueryResult:
+    async def scholar_query(self, topic: str, scope: ScopeDecision, *, timeout_s: float | None = None) -> ScholarQueryResult:
         prompt = json.dumps(
             {
                 "topic": topic,
@@ -327,9 +340,10 @@ class ResearchAgents:
             prompt,
             stage="scholar_scout",
             purpose="scholar query generation",
+            timeout_s=timeout_s,
         )
 
-    async def vocabulary_bridge(self, topic: str, scholar: dict[str, Any]) -> VocabularyBridgeResult:
+    async def vocabulary_bridge(self, topic: str, scholar: dict[str, Any], *, timeout_s: float | None = None) -> VocabularyBridgeResult:
         prompt = json.dumps(
             {"topic": topic, "scholar_evidence": _evidence_preview(scholar)},
             ensure_ascii=False,
@@ -339,9 +353,10 @@ class ResearchAgents:
             prompt,
             stage="vocabulary_bridge",
             purpose="industrial query generation",
+            timeout_s=timeout_s,
         )
 
-    async def academic_extract(self, items: list[dict[str, Any]]) -> AcademicExtractionBatch:
+    async def academic_extract(self, items: list[dict[str, Any]], *, timeout_s: float | None = None) -> AcademicExtractionBatch:
         prompt = json.dumps(
             {"results": _compact_items(items), "task": "Extract one structured academic evidence record per result."},
             ensure_ascii=False,
@@ -351,9 +366,10 @@ class ResearchAgents:
             prompt,
             stage="academic_extraction",
             purpose="academic evidence extraction",
+            timeout_s=timeout_s,
         )
 
-    async def adoption_extract(self, items: list[dict[str, Any]]) -> AdoptionExtractionBatch:
+    async def adoption_extract(self, items: list[dict[str, Any]], *, timeout_s: float | None = None) -> AdoptionExtractionBatch:
         prompt = json.dumps(
             {"results": _compact_items(items), "task": "Extract one structured adoption evidence record per result."},
             ensure_ascii=False,
@@ -363,9 +379,10 @@ class ResearchAgents:
             prompt,
             stage="adoption_extraction",
             purpose="adoption evidence extraction",
+            timeout_s=timeout_s,
         )
 
-    async def cluster_link(self, pairs: list[dict[str, Any]]) -> LinkDimensionBatch:
+    async def cluster_link(self, pairs: list[dict[str, Any]], *, timeout_s: float | None = None) -> LinkDimensionBatch:
         prompt = json.dumps(
             {"pairs": pairs, "task": "Compare each research/adoption cluster pair across four dimensions."},
             ensure_ascii=False,
@@ -375,26 +392,37 @@ class ResearchAgents:
             prompt,
             stage="cluster_linkage",
             purpose="research-to-reality dimension matching",
+            timeout_s=timeout_s,
         )
 
-    async def gap_narrative(self, analysis: dict[str, Any]) -> GapNarrativeResult:
+    async def gap_narrative(self, analysis: dict[str, Any], *, timeout_s: float | None = None) -> GapNarrativeResult:
         prompt = json.dumps(analysis, ensure_ascii=False)
         return await self._run(
             self.gap_narrator,
             prompt,
             stage="finalization",
             purpose="structured gap explanation",
+            timeout_s=timeout_s,
         )
 
-    async def review_deep_research(self, report: str) -> DeepResearchReviewResult:
+    async def review_deep_research(self, report: str, *, timeout_s: float | None = None) -> DeepResearchReviewResult:
         return await self._run(
             self.deep_research_reviewer,
             report,
             stage="conditional_deep_research",
             purpose="deep research evidence review",
+            timeout_s=timeout_s,
         )
 
-    async def _run(self, agent: Agent, prompt: str, *, stage: str, purpose: str) -> Any:
+    async def _run(
+        self,
+        agent: Agent,
+        prompt: str,
+        *,
+        stage: str,
+        purpose: str,
+        timeout_s: float | None = None,
+    ) -> Any:
         call_event = emit_event(
             "tool_call",
             {"name": agent.name, "purpose": purpose, "model": agent.model, "input": prompt},
@@ -402,9 +430,35 @@ class ResearchAgents:
             source="openai",
         )
         try:
-            result = await Runner.run(agent, prompt)
+            run = Runner.run(agent, prompt)
+            result = await asyncio.wait_for(run, timeout=timeout_s) if timeout_s is not None else await run
             output = result.final_output
             serialized = output.model_dump() if isinstance(output, BaseModel) else output
+        except (asyncio.TimeoutError, TimeoutError) as exc:
+            emit_event(
+                "note",
+                {
+                    "name": agent.name,
+                    "call_id": call_event["id"],
+                    "reason": "budget_timeout",
+                    "timeout_kind": "budget",
+                    "timeout_s": timeout_s,
+                },
+                stage=stage,
+                source="openai",
+            )
+            emit_event(
+                "tool_result",
+                {
+                    "name": agent.name,
+                    "call_id": call_event["id"],
+                    "timed_out": True,
+                    "timeout_kind": "budget",
+                },
+                stage=stage,
+                source="openai",
+            )
+            raise AgentBudgetTimeout(f"{agent.name} exceeded its {timeout_s}s budget") from exc
         except Exception as exc:
             emit_event(
                 "error",

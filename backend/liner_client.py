@@ -13,11 +13,12 @@ from events import emit_event
 class LinerClient:
     """Async client that exposes Liner JSON and SSE APIs to the pipeline."""
 
-    def __init__(self, base_url: str | None = None, api_key: str | None = None, timeout: float = 90.0):
+    def __init__(self, base_url: str | None = None, api_key: str | None = None, timeout: float = 8.0):
         self.base_url = (base_url or os.environ.get("LINER_API_BASE_URL", "https://platform.liner.com")).rstrip("/")
         self.api_key = api_key or os.environ.get("LINER_API_KEY", "")
         self.timeout = timeout
-        self.search_agent_timeout = float(os.environ.get("SEARCH_AGENT_TIMEOUT_S", "25"))
+        self.search_agent_timeout = float(os.environ.get("SEARCH_AGENT_TIMEOUT_S", "4"))
+        self.visualization_timeout = float(os.environ.get("VISUALIZATION_TIMEOUT_S", "4"))
 
     async def search_web(
         self,
@@ -28,6 +29,7 @@ class LinerClient:
         date_range: str | None = None,
         max_results: int = 10,
         stage: str = "adoption_scout",
+        timeout_s: float | None = None,
     ) -> dict[str, Any]:
         return await self._search(
             mode="web",
@@ -37,6 +39,7 @@ class LinerClient:
             date_range=date_range,
             max_results=max_results,
             stage=stage,
+            timeout_s=timeout_s,
         )
 
     async def search_scholar(
@@ -46,6 +49,7 @@ class LinerClient:
         lang: str | None = None,
         max_results: int = 10,
         stage: str = "scholar_scout",
+        timeout_s: float | None = None,
     ) -> dict[str, Any]:
         return await self._search(
             mode="scholar",
@@ -53,6 +57,7 @@ class LinerClient:
             lang=lang,
             max_results=max_results,
             stage=stage,
+            timeout_s=timeout_s,
         )
 
     async def search_agent(
@@ -63,6 +68,7 @@ class LinerClient:
         lang: str = "ko",
         request_id: str | None = None,
         stage: str = "adversarial_verifier",
+        timeout_s: float | None = None,
     ) -> dict[str, Any]:
         body = {
             "messages": messages,
@@ -76,7 +82,7 @@ class LinerClient:
             body=body,
             stage=stage,
             name="search_agent",
-            timeout_s=self.search_agent_timeout,
+            timeout_s=timeout_s if timeout_s is not None else self.search_agent_timeout,
         )
 
     async def deep_research(
@@ -84,7 +90,7 @@ class LinerClient:
         messages: list[dict[str, str]],
         *,
         lang: str = "ko",
-        timeout_s: float = 25,
+        timeout_s: float = 5,
         request_id: str | None = None,
         stage: str = "conditional_deep_research",
     ) -> dict[str, Any]:
@@ -112,6 +118,7 @@ class LinerClient:
         appearance: str = "light",
         date_range: str | None = None,
         stage: str = "gap_map",
+        timeout_s: float | None = None,
     ) -> dict[str, Any]:
         body = {
             "query": query,
@@ -131,7 +138,7 @@ class LinerClient:
             body=body,
             stage=stage,
             name="visualization",
-            timeout_s=self.timeout,
+            timeout_s=timeout_s if timeout_s is not None else self.visualization_timeout,
         )
 
     async def _search(
@@ -144,6 +151,7 @@ class LinerClient:
         stage: str,
         country_code: str | None = None,
         date_range: str | None = None,
+        timeout_s: float | None = None,
     ) -> dict[str, Any]:
         path = f"/api/v1/tools/search/{mode}"
         body = {
@@ -157,13 +165,13 @@ class LinerClient:
         url = f"{self.base_url}{path}"
         call_event = emit_event(
             "tool_call",
-            {"name": "search", "mode": mode, "method": "POST", "url": url, "body": body},
+            {"name": "search", "mode": mode, "method": "POST", "url": url, "body": body, "timeout_s": timeout_s or self.timeout},
             stage=stage,
             source="liner",
         )
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(timeout=timeout_s or self.timeout) as client:
                 response = await client.post(
                     url,
                     headers={"x-api-key": self.api_key, "Content-Type": "application/json"},
@@ -171,6 +179,27 @@ class LinerClient:
                 )
                 response_body = response.json()
                 response.raise_for_status()
+        except (httpx.TimeoutException, asyncio.TimeoutError, TimeoutError):
+            emit_event(
+                "note",
+                {
+                    "name": "search",
+                    "mode": mode,
+                    "call_id": call_event["id"],
+                    "reason": "budget_timeout",
+                    "timeout_kind": "budget",
+                    "timeout_s": timeout_s or self.timeout,
+                },
+                stage=stage,
+                source="liner",
+            )
+            emit_event(
+                "tool_result",
+                {"name": "search", "mode": mode, "call_id": call_event["id"], "timed_out": True, "timeout_kind": "budget"},
+                stage=stage,
+                source="liner",
+            )
+            return {"results": [], "totalCount": 0, "timed_out": True, "timeout_kind": "budget"}
         except Exception as exc:
             emit_event(
                 "error",
@@ -232,18 +261,31 @@ class LinerClient:
                     await asyncio.wait_for(_consume(response), timeout=timeout_s)
         except (asyncio.TimeoutError, TimeoutError):
             emit_event(
-                "error",
+                "note",
                 {
                     "name": name,
                     "call_id": call_event["id"],
-                    "reason": "timeout",
+                    "reason": "budget_timeout",
+                    "timeout_kind": "budget",
                     "timeout_s": timeout_s,
                     "events_received": len(events),
                 },
                 stage=stage,
                 source="liner",
             )
-            return {"events": events, "timed_out": True}
+            emit_event(
+                "tool_result",
+                {
+                    "name": name,
+                    "call_id": call_event["id"],
+                    "timed_out": True,
+                    "timeout_kind": "budget",
+                    "events_received": len(events),
+                },
+                stage=stage,
+                source="liner",
+            )
+            return {"events": events, "timed_out": True, "timeout_kind": "budget"}
         except Exception as exc:
             emit_event(
                 "error",
