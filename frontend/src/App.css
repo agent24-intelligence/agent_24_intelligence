@@ -64,6 +64,65 @@
   padding: 88px 24px 72px;
 }
 
+.fast-mode-toggle {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.15px;
+  backdrop-filter: blur(10px);
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.fast-mode-toggle:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-muted);
+  transform: translateY(-1px);
+}
+
+.fast-mode-toggle.is-on {
+  color: #fff;
+  background: var(--text);
+  border-color: var(--text);
+}
+
+.fast-mode-toggle:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.fast-mode-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.35;
+}
+
+.fast-mode-toggle.is-on .fast-mode-dot {
+  background: #8ee6a8;
+  opacity: 1;
+  box-shadow: 0 0 0 3px rgb(142 230 168 / 18%);
+}
+
+.fast-mode-state {
+  min-width: 24px;
+  color: inherit;
+  font-size: 9px;
+  letter-spacing: 0.6px;
+  opacity: 0.65;
+}
+
 .user-view-intro {
   text-align: center;
   margin-bottom: 44px;
@@ -1237,6 +1296,12 @@ main {
 }
 
 @media (max-width: 640px) {
+  .fast-mode-toggle {
+    top: 12px;
+    right: 12px;
+    padding: 7px 9px;
+  }
+
   .user-view-scores {
     grid-template-columns: 1fr;
   }

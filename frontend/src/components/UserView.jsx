@@ -230,6 +230,7 @@ function useScrollPastTop(threshold = 400) {
 export default function UserView() {
   const [topicExample] = useState(() => TOPIC_EXAMPLES[Math.floor(Math.random() * TOPIC_EXAMPLES.length)])
   const [topic, setTopic] = useState('')
+  const [fastMode, setFastMode] = useState(false)
   const [status, setStatus] = useState('idle') // idle | running | done | error
   const [stage, setStage] = useState(null)
   const [result, setResult] = useState(null)
@@ -321,7 +322,7 @@ export default function UserView() {
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic: topicToRun, max_results: 10 }),
+        body: JSON.stringify({ topic: topicToRun, max_results: 10, fast_mode: fastMode }),
         signal: controller.signal,
       })
 
@@ -384,6 +385,21 @@ export default function UserView() {
 
   return (
     <div className="user-view">
+      <button
+        type="button"
+        className={`fast-mode-toggle ${fastMode ? 'is-on' : ''}`}
+        onClick={() => {
+          setFastMode((value) => !value)
+          setLastAnalyzedTopic(null)
+        }}
+        aria-pressed={fastMode}
+        disabled={status === 'running'}
+        title={fastMode ? '단계별 시간 제한을 적용합니다' : '시간 제한 없이 전체 분석을 실행합니다'}
+      >
+        <span className="fast-mode-dot" />
+        <span>Fast mode</span>
+        <span className="fast-mode-state">{fastMode ? 'ON' : 'OFF'}</span>
+      </button>
       {showScrollTop && (
         <button
           type="button"
