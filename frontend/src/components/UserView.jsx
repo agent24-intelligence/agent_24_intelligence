@@ -190,6 +190,62 @@ function resultList(result, key) {
   return []
 }
 
+function parseSynthesisMarkdown(text) {
+  const lines = String(text || '').split(/\r?\n/)
+  const blocks = []
+  let paragraph = []
+
+  function flushParagraph() {
+    const value = paragraph.join(' ').trim()
+    if (value) blocks.push({ type: 'paragraph', text: value })
+    paragraph = []
+  }
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+    if (!line) {
+      flushParagraph()
+      continue
+    }
+    const heading = line.match(/^#{2,4}\s+(.+)$/)
+    if (heading) {
+      flushParagraph()
+      blocks.push({ type: 'heading', text: heading[1].trim() })
+      continue
+    }
+    paragraph.push(line)
+  }
+  flushParagraph()
+  return blocks
+}
+
+function FinalSynthesisText({ text, streaming }) {
+  const blocks = parseSynthesisMarkdown(text)
+  if (blocks.length === 0) {
+    return (
+      <p className="final-synthesis-placeholder">
+        분석 글 작성 중{streaming && <span className="final-synthesis-cursor" />}
+      </p>
+    )
+  }
+  return (
+    <>
+      {blocks.map((block, index) =>
+        block.type === 'heading' ? (
+          <h4 key={index} className="final-synthesis-section-title">
+            {block.text}
+          </h4>
+        ) : (
+          <p key={index} className="final-synthesis-paragraph">
+            {block.text}
+            {streaming && index === blocks.length - 1 && <span className="final-synthesis-cursor" />}
+          </p>
+        ),
+      )}
+    </>
+  )
+}
+
 // 점수(0~100)를 명암 강도 클래스로 매핑 — 무채색 베이스 안에서 값이 클수록 진하게.
 function scoreTone(value) {
   if (typeof value !== 'number') return ''
@@ -912,8 +968,7 @@ export default function UserView() {
             <div className={`final-synthesis final-synthesis-${finalSynthesisStatus || 'streaming'}`}>
               <h3 className="final-synthesis-title">최종 분석</h3>
               <div className="final-synthesis-body">
-                {finalSynthesisText || '분석 글 작성 중'}
-                {finalSynthesisStatus === 'streaming' && <span className="final-synthesis-cursor" />}
+                <FinalSynthesisText text={finalSynthesisText} streaming={finalSynthesisStatus === 'streaming'} />
               </div>
             </div>
           )}
