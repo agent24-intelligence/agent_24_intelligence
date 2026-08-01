@@ -40,6 +40,9 @@ body {
   background: var(--bg);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
+  /* 한글 단어 중간이 아니라 어절 단위로만 줄바꿈되게 (예: "찾아드려요"가 "찾"/"아드려요"로 끊기는 것 방지) */
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 #root {

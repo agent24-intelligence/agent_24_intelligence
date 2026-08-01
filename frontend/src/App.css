@@ -553,13 +553,16 @@ main {
   border-right: 1px solid var(--border);
 }
 
+/* 헤더의 "사용자 화면" 링크(.clean-link)와 같은 크기/모양의 필(pill) 버튼으로 통일 —
+   같은 화면에 같이 보이는데 글씨 크기·모서리가 달라서 어색해 보이던 걸 맞춤. */
 .raw-stream-toolbar button {
   background: var(--surface-2);
   border: 1px solid var(--border);
   color: var(--text);
   font-weight: 600;
+  font-size: 12.5px;
   padding: 6px 14px;
-  border-radius: 8px;
+  border-radius: 999px;
   transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
 

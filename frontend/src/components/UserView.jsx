@@ -56,10 +56,13 @@ function ArrowIcon() {
   )
 }
 
+// 정지(■) 대신 취소를 뜻하는 X — 미디어 플레이어 맥락이 없으면 정지 아이콘은
+// 잘 안 읽힌다는 피드백이 있어서 바꿈.
 function StopIcon() {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-      <rect x="5" y="5" width="14" height="14" rx="2" />
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="6" y1="6" x2="18" y2="18" />
+      <line x1="18" y1="6" x2="6" y2="18" />
     </svg>
   )
 }
@@ -133,9 +136,11 @@ export default function UserView() {
       }
 
       if (!res.ok) {
+        // 백엔드 에러 응답 shape이 { detail } (FastAPI 기본/검증 에러)이거나
+        // { error, message } (파이프라인 예외 핸들러)일 수 있어서 둘 다 본다.
         const detail = Array.isArray(data?.detail)
           ? data.detail.map((d) => d.msg || JSON.stringify(d)).join(', ')
-          : data?.detail
+          : data?.detail || data?.message
         throw new Error(detail || `요청이 실패했어요 (${res.status}). 잠시 후 다시 시도해주세요.`)
       }
 
@@ -178,7 +183,7 @@ export default function UserView() {
           Gap Radar
         </span>
         <h1>Research-to-Reality Radar</h1>
-        <p>관심 있는 기술이나 연구 방법론을 입력하면, 학계 연구는 앞서 있지만 아직 산업 현장에는 도입되지 않은 지점을 찾아드려요.</p>
+        <p>기술 하나만 입력하세요. 논문엔 있는데 아직 현장엔 없는 부분을 찾아드려요.</p>
       </div>
 
       <form className="user-view-form" onSubmit={runAnalyze}>
@@ -189,11 +194,23 @@ export default function UserView() {
           disabled={status === 'running'}
         />
         {status === 'running' ? (
-          <button type="button" className="user-view-icon-btn is-stop" onClick={stopAnalyze} aria-label="분석 중단">
+          <button
+            type="button"
+            className="user-view-icon-btn is-stop"
+            onClick={stopAnalyze}
+            aria-label="분석 중단"
+            title="중단"
+          >
             <StopIcon />
           </button>
         ) : (
-          <button type="submit" className="user-view-icon-btn" disabled={!topic.trim()} aria-label="분석 시작">
+          <button
+            type="submit"
+            className="user-view-icon-btn"
+            disabled={!topic.trim()}
+            aria-label="분석 시작"
+            title="분석 시작"
+          >
             <ArrowIcon />
           </button>
         )}
