@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 from starlette.responses import JSONResponse
 
 from agent_pipeline import ResearchPipeline, build_deadline_result
+from evidence_logic import should_start_final_synthesis
 from events import emit_event
 from input_gate import (
     contains_hangul as _contains_hangul,
@@ -236,7 +237,7 @@ async def analyze(request: AnalyzeRequest):
                 "timing": timing,
             }
         )
-        _start_final_synthesis(pipeline, result, request_runtime)
+        await _attach_final_synthesis(pipeline, result, request_runtime)
         return result
 
     except (asyncio.TimeoutError, TimeoutError):
@@ -264,7 +265,7 @@ async def analyze(request: AnalyzeRequest):
                 },
             }
         )
-        _start_final_synthesis(pipeline, result, request_runtime)
+        await _attach_final_synthesis(pipeline, result, request_runtime)
         return result
     except PreflightFailure as exc:
         return JSONResponse(
@@ -287,27 +288,20 @@ async def analyze(request: AnalyzeRequest):
         )
 
 
-def _start_final_synthesis(pipeline: ResearchPipeline, result: dict[str, Any], runtime: RuntimeConfig) -> None:
-    if result.get("status") != "completed" or result.get("label") in {"unconfirmed_field"}:
+async def _attach_final_synthesis(pipeline: ResearchPipeline, result: dict[str, Any], runtime: RuntimeConfig) -> None:
+    if not should_start_final_synthesis(result.get("status"), result.get("label")):
         return
     run_id = f"analysis_{uuid4().hex[:12]}"
     result["run_id"] = run_id
     result["final_synthesis"] = {"status": "streaming", "text": ""}
     payload = _final_synthesis_payload(result)
-    timeout_s = None if runtime.disable_timeouts else runtime.final_synthesis_timeout_s
-    asyncio.create_task(_run_final_synthesis_stream(pipeline, payload, run_id, timeout_s))
-
-
-async def _run_final_synthesis_stream(
-    pipeline: ResearchPipeline,
-    payload: dict[str, Any],
-    run_id: str,
-    timeout_s: float | None,
-) -> None:
+    timeout_s = runtime.final_synthesis_timeout_s
     try:
-        await pipeline.agents.stream_final_synthesis(payload, run_id=run_id, timeout_s=timeout_s)
-    except AgentBudgetTimeout:
-        return
+        text = await pipeline.agents.stream_final_synthesis(payload, run_id=run_id, timeout_s=timeout_s)
+        result["final_synthesis"] = {"status": "complete", "text": text}
+    except AgentBudgetTimeout as exc:
+        text = exc.partial_text or "최종 분석 시간 예산 안에서 글 작성을 완료하지 못했습니다."
+        result["final_synthesis"] = {"status": "timeout", "text": text, "timed_out": True}
     except Exception as exc:
         emit_event(
             "error",
@@ -315,6 +309,7 @@ async def _run_final_synthesis_stream(
             stage="final_synthesis",
             source="system",
         )
+        result["final_synthesis"] = {"status": "error", "text": "최종 분석 생성에 실패했습니다.", "error": str(exc)}
 
 
 def _final_synthesis_payload(result: dict[str, Any]) -> dict[str, Any]:

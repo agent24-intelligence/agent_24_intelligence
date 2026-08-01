@@ -53,6 +53,10 @@ def stable_id(prefix: str, *parts: str | None) -> str:
     return f"{prefix}_{digest}"
 
 
+def should_start_final_synthesis(status: str | None, label: str | None) -> bool:
+    return status == "completed" and label not in {"unconfirmed_field", "insufficient_evidence"}
+
+
 def source_id(item: dict[str, Any]) -> str:
     doi = item.get("doi") or item.get("DOI")
     if doi:

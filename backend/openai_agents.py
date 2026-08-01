@@ -18,6 +18,10 @@ LARGE_MODEL = os.environ.get("OPENAI_LARGE_MODEL", "gpt-4o")
 class AgentBudgetTimeout(TimeoutError):
     """An intentional per-stage budget expiry, distinct from a provider error."""
 
+    def __init__(self, message: str, partial_text: str = ""):
+        super().__init__(message)
+        self.partial_text = partial_text
+
 
 class ScopeDecision(BaseModel):
     status: Literal["broad", "focused", "niche", "unconfirmed"]
@@ -621,7 +625,10 @@ class ResearchAgents:
                 stage=stage,
                 source="openai",
             )
-            raise AgentBudgetTimeout(f"{self.final_synthesis_writer.name} exceeded its {timeout_s}s budget") from exc
+            raise AgentBudgetTimeout(
+                f"{self.final_synthesis_writer.name} exceeded its {timeout_s}s budget",
+                partial_text=text,
+            ) from exc
         except Exception as exc:
             text = "".join(chunks)
             emit_event(
