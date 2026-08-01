@@ -180,7 +180,7 @@ class ResearchPipeline:
             total_relevant_results=academic_extraction_meta["total_relevant_results"] + adoption_extraction_meta["total_relevant_results"] + counter_meta["total_relevant_results"],
             adversarial={
                 "performed": True,
-                "timed_out": bool(counter_result.get("timed_out")),
+                "timed_out": _agent_search_failed(counter_result),
                 "result_count": len({item.get("url") or item.get("title") for item in counter_items if item.get("url") or item.get("title")}),
             },
         )
@@ -232,7 +232,7 @@ class ResearchPipeline:
                 total_relevant_results=academic_extraction_meta["total_relevant_results"] + adoption_extraction_meta["total_relevant_results"] + counter_meta["total_relevant_results"] + len(deep_items),
                 adversarial={
                     "performed": True,
-                    "timed_out": bool(counter_result.get("timed_out")),
+                    "timed_out": _agent_search_failed(counter_result),
                     "result_count": len({item.get("url") or item.get("title") for item in [*counter_items, *deep_items] if item.get("url") or item.get("title")}),
                 },
             )
@@ -394,13 +394,32 @@ class ResearchPipeline:
         families = vocabulary.query_families.model_dump()
         if not any(families.values()):
             families = {"technology": vocabulary.terms, "use_case": [], "context": []}
+
+        technologies = _clean_terms(families.get("technology", [])) or _clean_terms(vocabulary.terms)
+        use_cases = _clean_terms(families.get("use_case", []))
+        contexts = _clean_terms(families.get("context", []))
+
         specs: list[tuple[str, str]] = []
-        for family in ("technology", "use_case", "context"):
-            for term in families.get(family, []):
-                if term:
-                    specs.append((term, family))
+        if technologies and use_cases:
+            specs.append((f"{technologies[0]} {use_cases[0]} production deployment", "technology+use_case"))
+        if technologies and len(use_cases) > 1:
+            specs.append((f"{technologies[0]} {use_cases[1]} production deployment", "technology+use_case"))
+        if technologies and contexts:
+            specs.append((f"{technologies[0]} {contexts[0]} engineering blog production", "technology+context"))
+        for technology in technologies[:2]:
+            for use_case in use_cases[:2]:
+                specs.append((f"{technology} {use_case} case study", "technology+use_case"))
+        for use_case in use_cases[:2]:
+            for context in contexts[:2]:
+                specs.append((f"{use_case} {context} customer deployment", "use_case+context"))
+        for technology in technologies[:2]:
+            for context in contexts[:2]:
+                specs.append((f"{technology} {context} real-world implementation", "technology+context"))
+
         if not specs:
-            specs = [(term, "technology") for term in vocabulary.terms]
+            specs = [(f"{term} production deployment case study", "technology") for term in _clean_terms(vocabulary.terms)]
+        if not specs:
+            specs = [(term, "technology") for term in _clean_terms(families.get("technology", []))]
         return list(dict.fromkeys(specs))[: self.runtime.max_adoption_queries]
 
     async def _run_adoption_scout(self, query_specs: list[tuple[str, str]], *, max_results: int) -> list[dict[str, Any]]:
@@ -437,20 +456,34 @@ class ResearchPipeline:
                 normalized.append(response)
         return normalized
 
-    async def _extract_academic_records(self, items: list[dict[str, Any]]) -> tuple[list[AcademicEvidenceRecord], dict[str, int]]:
+    async def _extract_academic_records(self, items: list[dict[str, Any]]) -> tuple[list[AcademicEvidenceRecord], dict[str, Any]]:
         emit_event("note", {"text": f"Scholar 결과 {len(items)}건에서 학술 적용 주장과 검증 신호를 구조화합니다."}, stage="academic_extraction", source="system")
         if not items:
             return [], {"total_relevant_results": 0, "structured_record_count": 0, "failed_count": 0}
+        source_items = self._limit_extraction_items(items, stage="academic_extraction")
         try:
-            batch: AcademicExtractionBatch = await self.agents.academic_extract(items, timeout_s=self._stage_timeout("academic_extraction"))
+            batch: AcademicExtractionBatch = await self.agents.academic_extract(source_items, timeout_s=self._stage_timeout("academic_extraction"))
         except AgentBudgetTimeout:
             emit_event("note", {"text": "학술 근거 구조화 시간 예산이 끝나 검색 결과만으로 잠정 판정합니다."}, stage="academic_extraction", source="system")
             return [], {"total_relevant_results": len(items), "structured_record_count": 0, "failed_count": len(items), "timed_out": True}
+        except Exception as exc:
+            emit_event(
+                "note",
+                {"text": "학술 근거 구조화 실패 → 검색 결과 원문만 남기고 잠정 판정합니다.", "error": str(exc)},
+                stage="academic_extraction",
+                source="system",
+            )
+            return [], {
+                "total_relevant_results": len(items),
+                "structured_record_count": 0,
+                "failed_count": len(items),
+                "error": str(exc),
+            }
         records: list[AcademicEvidenceRecord] = []
         for extraction in batch.records:
             if not extraction.is_relevant or extraction.extraction_confidence < 0.55:
                 continue
-            item = items[extraction.source_index] if extraction.source_index < len(items) else None
+            item = source_items[extraction.source_index] if extraction.source_index < len(source_items) else None
             if not item or not extraction.evidence_span or not extraction.technology_canonical:
                 continue
             records.append(
@@ -485,23 +518,40 @@ class ResearchPipeline:
             "total_relevant_results": len(items),
             "structured_record_count": len(records),
             "failed_count": max(0, len(items) - len(records)),
+            "structured_source_count": len(source_items),
         }
 
-    async def _extract_adoption_records(self, items: list[dict[str, Any]]) -> tuple[list[AdoptionEvidenceRecord], dict[str, int]]:
+    async def _extract_adoption_records(self, items: list[dict[str, Any]]) -> tuple[list[AdoptionEvidenceRecord], dict[str, Any]]:
         emit_event("note", {"text": f"산업 검색 결과 {len(items)}건에서 실제 도입·중단 사건을 구조화합니다."}, stage="adoption_extraction", source="system")
         if not items:
             return [], {"total_relevant_results": 0, "structured_record_count": 0, "failed_count": 0}
+        source_items = self._limit_extraction_items(items, stage="adoption_extraction")
         try:
-            batch: AdoptionExtractionBatch = await self.agents.adoption_extract(items, timeout_s=self._stage_timeout("adoption_extraction"))
+            batch: AdoptionExtractionBatch = await self.agents.adoption_extract(source_items, timeout_s=self._stage_timeout("adoption_extraction"))
         except AgentBudgetTimeout:
             emit_event("note", {"text": "산업 도입 근거 구조화 시간 예산이 끝나 확인된 기록만으로 잠정 판정합니다."}, stage="adoption_extraction", source="system")
             return [], {"total_relevant_results": len(items), "structured_record_count": 0, "failed_count": len(items), "timed_out": True}
+        except Exception as exc:
+            emit_event(
+                "note",
+                {"text": "산업 도입 근거 구조화 실패 → 검색 결과 원문과 반증 검색으로 잠정 판정합니다.", "error": str(exc)},
+                stage="adoption_extraction",
+                source="system",
+            )
+            return [], {
+                "total_relevant_results": len(items),
+                "structured_record_count": 0,
+                "failed_count": len(items),
+                "error": str(exc),
+            }
         records: list[AdoptionEvidenceRecord] = []
         for extraction in batch.records:
             if not extraction.is_relevant or extraction.extraction_confidence < 0.55:
                 continue
-            item = items[extraction.source_index] if extraction.source_index < len(items) else None
-            if not item or not extraction.evidence_span or not extraction.technology_canonical or not extraction.subject_canonical:
+            item = source_items[extraction.source_index] if extraction.source_index < len(source_items) else None
+            technology_canonical = normalize_text(extraction.technology_canonical or extraction.technology_raw) or None
+            subject_canonical = normalize_text(extraction.subject_canonical or extraction.subject_raw) or None
+            if not item or not extraction.evidence_span or not technology_canonical or not subject_canonical:
                 continue
             usage_context = extraction.usage_context if extraction.relation == "uses" else None
             adoption_stage = extraction.adoption_stage if extraction.relation == "uses" and usage_context != "vendor_product_integration" else None
@@ -513,19 +563,19 @@ class ResearchPipeline:
                     source_title=item.get("title") or "제목 없음",
                     published_at=item.get("published_at") or item.get("publishedAt"),
                     technology_raw=extraction.technology_raw,
-                    technology_canonical=normalize_text(extraction.technology_canonical) or None,
+                    technology_canonical=technology_canonical,
                     use_case_raw=extraction.use_case_raw,
-                    use_case_canonical=normalize_text(extraction.use_case_canonical) or None,
+                    use_case_canonical=normalize_text(extraction.use_case_canonical or extraction.use_case_raw) or None,
                     context_raw=extraction.context_raw,
-                    context_canonical=normalize_text(extraction.context_canonical) or None,
+                    context_canonical=normalize_text(extraction.context_canonical or extraction.context_raw) or None,
                     expected_value_raw=extraction.expected_value_raw,
-                    expected_value_canonical=normalize_text(extraction.expected_value_canonical) or None,
+                    expected_value_canonical=normalize_text(extraction.expected_value_canonical or extraction.expected_value_raw) or None,
                     canonical_claim=extraction.canonical_claim or extraction.evidence_span,
                     evidence_span=extraction.evidence_span,
                     extraction_confidence=extraction.extraction_confidence,
                     query_family=item.get("query_family"),
                     subject_raw=extraction.subject_raw,
-                    subject_canonical=normalize_text(extraction.subject_canonical) or None,
+                    subject_canonical=subject_canonical,
                     relation=extraction.relation,
                     usage_context=usage_context,
                     adoption_stage=adoption_stage,
@@ -539,7 +589,24 @@ class ResearchPipeline:
             "total_relevant_results": len(items),
             "structured_record_count": len(records),
             "failed_count": max(0, len(items) - len(records)),
+            "structured_source_count": len(source_items),
         }
+
+    def _limit_extraction_items(self, items: list[dict[str, Any]], *, stage: str) -> list[dict[str, Any]]:
+        limit = self.runtime.max_extraction_items
+        if len(items) <= limit:
+            return items
+        emit_event(
+            "note",
+            {
+                "text": f"구조화 대상이 {len(items)}건이라 상위 {limit}건만 사용합니다.",
+                "total_count": len(items),
+                "structured_source_count": limit,
+            },
+            stage=stage,
+            source="system",
+        )
+        return items[:limit]
 
     async def _run_cluster_linkage(
         self,
@@ -1006,6 +1073,21 @@ def _flatten_results(responses: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [item for response in responses for item in response.get("results", [])]
 
 
+def _clean_terms(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    terms: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        term = str(value or "").strip()
+        key = normalize_text(term)
+        if not term or not key or key in seen:
+            continue
+        seen.add(key)
+        terms.append(term)
+    return terms
+
+
 def _extract_counter_items(result: dict[str, Any]) -> list[dict[str, Any]]:
     items = []
     for event in result.get("events", []):
@@ -1035,6 +1117,10 @@ def _extract_report(result: dict[str, Any]) -> str:
 
 def _has_event_type(result: dict[str, Any], event_type: str) -> bool:
     return any(event.get("type") == event_type for event in result.get("events", []))
+
+
+def _agent_search_failed(result: dict[str, Any]) -> bool:
+    return bool(result.get("timed_out") or result.get("stream_error") or _has_event_type(result, "data-error"))
 
 
 def _cluster_summary(cluster: Any) -> dict[str, Any]:
