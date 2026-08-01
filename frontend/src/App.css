@@ -54,8 +54,8 @@
   transform: translateY(-2px);
 }
 
-/* 다크/라이트 토글 — scroll-top-btn과 같은 자리 언어(원형 고스트 버튼), 반대편
-   위쪽 구석에 둬서 dev-link(좌상단)/scroll-top-btn(우하단)과 겹치지 않게 한다. */
+/* �ㅽ겕/�쇱씠�� �좉� �� scroll-top-btn怨� 媛숈� �먮━ �몄뼱(�먰삎 怨좎뒪�� 踰꾪듉), 諛섎���
+   �꾩そ 援ъ꽍�� �ъ꽌 dev-link(醫뚯긽��)/scroll-top-btn(�고븯��)怨� 寃뱀튂吏� �딄쾶 �쒕떎. */
 .theme-toggle-btn {
   position: fixed;
   right: 16px;
@@ -81,11 +81,11 @@
   transform: translateY(-2px);
 }
 
-/* -- 사용자 화면 -- */
+/* -- �ъ슜�� �붾㈃ -- */
 
 .user-view {
-  /* 고정 px 대신 화면 폭에 비례하게 — 좁은 창에선 여백이 자연스럽게 줄고,
-     아주 넓은 데모용 모니터에서도 좌우가 텅 비어 보이지 않게 상한만 걸어둠. */
+  /* 怨좎젙 px ���� �붾㈃ ��뿉 鍮꾨��섍쾶 �� 醫곸� 李쎌뿉�� �щ갚�� �먯뿰�ㅻ읇寃� 以꾧퀬,
+     �꾩＜ �볦� �곕え�� 紐⑤땲�곗뿉�쒕룄 醫뚯슦媛� �� 鍮꾩뼱 蹂댁씠吏� �딄쾶 �곹븳留� 嫄몄뼱��. */
   width: min(90%, 920px);
   margin: 0 auto;
   padding: 88px 24px 72px;
@@ -95,10 +95,10 @@
   justify-content: flex-start;
 }
 
-/* 입력 전/타이핑 중일 때만 화면 세로 중앙에 오게 하고, 제출하는 순간(진행 중 포함)
-   바로 위 정렬로 전환한다. 구글 검색창처럼 전환이 "제출 시점 딱 한 번"만 일어나야
-   자연스럽다 — running도 중앙에 두면 idle→running, running→done 두 번 재배치돼서
-   더 산만해진다. */
+/* �낅젰 ��/���댄븨 以묒씪 �뚮쭔 �붾㈃ �몃줈 以묒븰�� �ㅺ쾶 �섍퀬, �쒖텧�섎뒗 �쒓컙(吏꾪뻾 以� �ы븿)
+   諛붾줈 �� �뺣젹濡� �꾪솚�쒕떎. 援ш� 寃��됱갹泥섎읆 �꾪솚�� "�쒖텧 �쒖젏 �� �� 踰�"留� �쇱뼱�섏빞
+   �먯뿰�ㅻ읇�� �� running�� 以묒븰�� �먮㈃ idle�뭨unning, running�뭗one �� 踰� �щ같移섎뤌��
+   �� �곕쭔�댁쭊��. */
 .user-view.is-centered {
   justify-content: center;
   padding-top: 24px;
@@ -110,8 +110,8 @@
   flex-shrink: 0;
 }
 
-/* 버튼 누르면 위에 잠깐 떴다 사라지는 상태 메시지 — 1.6초 동안 살짝 페이드
-   인/아웃하고, 그 직후 JS 타이머가 DOM에서 완전히 제거한다. */
+/* 踰꾪듉 �꾨Ⅴ硫� �꾩뿉 �좉퉸 �대떎 �щ씪吏��� �곹깭 硫붿떆吏� �� 1.6珥� �숈븞 �댁쭩 �섏씠��
+   ��/�꾩썐�섍퀬, 洹� 吏곹썑 JS ���대㉧媛� DOM�먯꽌 �꾩쟾�� �쒓굅�쒕떎. */
 .user-view-fast-toast {
   position: absolute;
   bottom: 100%;
@@ -145,9 +145,9 @@
   }
 }
 
-/* 빠른 모드 — 폼 안 다른 아이콘 버튼과 같은 크기/모양의 고스트 버튼.
-   꺼짐: 테두리만 있는 무채색(거의 눈에 안 띔). 켜짐: 제출 버튼과 같은 검정 채움으로
-   "지금 적용 중"이라는 걸 확실히 드러낸다. */
+/* 鍮좊Ⅸ 紐⑤뱶 �� �� �� �ㅻⅨ �꾩씠肄� 踰꾪듉怨� 媛숈� �ш린/紐⑥뼇�� 怨좎뒪�� 踰꾪듉.
+   爰쇱쭚: �뚮몢由щ쭔 �덈뒗 臾댁콈��(嫄곗쓽 �덉뿉 �� ��). 耳쒖쭚: �쒖텧 踰꾪듉怨� 媛숈� 寃��� 梨꾩��쇰줈
+   "吏�湲� �곸슜 以�"�대씪�� 嫄� �뺤떎�� �쒕윭�몃떎. */
 .user-view-fast-btn {
   flex-shrink: 0;
   display: flex;
@@ -176,9 +176,9 @@
 .user-view-fast-btn.is-on:hover:not(:disabled) {
   background: var(--accent-2);
   border-color: var(--accent-2);
-  /* :hover:not() 쪽 선택자가 .is-on보다 명시도가 높아서 이 규칙이 없으면
-     색이 var(--text)로 밀려 켜짐 상태에서 호버할 때 아이콘이 배경과
-     거의 같은 색이 돼 안 보였다 — 명시적으로 다시 지정해 되돌린다. */
+  /* :hover:not() 履� �좏깮�먭� .is-on蹂대떎 紐낆떆�꾧� �믪븘�� �� 洹쒖튃�� �놁쑝硫�
+     �됱씠 var(--text)濡� 諛��� 耳쒖쭚 �곹깭�먯꽌 �몃쾭�� �� �꾩씠肄섏씠 諛곌꼍怨�
+     嫄곗쓽 媛숈� �됱씠 �� �� 蹂댁��� �� 紐낆떆�곸쑝濡� �ㅼ떆 吏��뺥빐 �섎룎由곕떎. */
   color: var(--bg);
 }
 
@@ -192,18 +192,18 @@
   margin-bottom: 64px;
 }
 
-/* 로고 마크 — kicker 배지, dev 헤더 등 작은 자리에 씀 */
+/* 濡쒓퀬 留덊겕 �� kicker 諛곗�, dev �ㅻ뜑 �� �묒� �먮━�� �� */
 .brand-mark {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
   display: block;
-  /* 로고 PNG가 검정 실루엣이라 다크 배경에선 반전시켜 흰색으로 보이게 함 */
+  /* 濡쒓퀬 PNG媛� 寃��� �ㅻ（�ｌ씠�� �ㅽ겕 諛곌꼍�먯꽑 諛섏쟾�쒖폒 �곗깋�쇰줈 蹂댁씠寃� �� */
   filter: invert(var(--logo-invert));
 }
 
-/* 제목 뒤에 로고 심볼을 크고 옅게 깔아서 그래픽적인 느낌을 줌 (배지+고스트 텍스트 대체).
-   overflow는 visible로 둬서 심볼이 타이틀 영역 위로 튀어나와도 안 잘리게 함. */
+/* �쒕ぉ �ㅼ뿉 濡쒓퀬 �щ낵�� �ш퀬 �낃쾶 源붿븘�� 洹몃옒�쎌쟻�� �먮굦�� 以� (諛곗�+怨좎뒪�� �띿뒪�� ��泥�).
+   overflow�� visible濡� �ъ꽌 �щ낵�� ���댄� �곸뿭 �꾨줈 ���대굹���� �� �섎━寃� ��. */
 .user-view-title-wrap {
   position: relative;
   display: flex;
@@ -250,8 +250,8 @@
   margin-bottom: 36px;
 }
 
-/* 제출 전 타이핑 중에 뜨는 실시간 추천 — 폼 바로 아래로 당겨 붙이고, 그 아래(진행/결과 영역)와는
-   폼과 같은 만큼 떨어뜨린다. 안 뜰 땐 폼의 margin-bottom 36px가 그대로 유지된다. */
+/* �쒖텧 �� ���댄븨 以묒뿉 �⑤뒗 �ㅼ떆媛� 異붿쿇 �� �� 諛붾줈 �꾨옒濡� �밴꺼 遺숈씠怨�, 洹� �꾨옒(吏꾪뻾/寃곌낵 �곸뿭)����
+   �쇨낵 媛숈� 留뚰겮 �⑥뼱�⑤┛��. �� �� �� �쇱쓽 margin-bottom 36px媛� 洹몃�濡� �좎��쒕떎. */
 .user-view-live-suggestions {
   display: flex;
   flex-direction: column;
@@ -262,9 +262,9 @@
   animation: rise-in 0.2s ease both;
 }
 
-/* 이전 결과를 그대로 보여준 채로 새로 타이핑할 때만, 지금 입력 중인 추천이랑 아래
-   예전 결과가 구분 안 되고 붙어 보일 수 있어서 구분선을 둔다. 결과가 아직 없는
-   첫 검색 상태에서는 아래에 아무것도 없으므로 선도 필요 없다. */
+/* �댁쟾 寃곌낵瑜� 洹몃�濡� 蹂댁뿬以� 梨꾨줈 �덈줈 ���댄븨�� �뚮쭔, 吏�湲� �낅젰 以묒씤 異붿쿇�대옉 �꾨옒
+   �덉쟾 寃곌낵媛� 援щ텇 �� �섍퀬 遺숈뼱 蹂댁씪 �� �덉뼱�� 援щ텇�좎쓣 �붾떎. 寃곌낵媛� �꾩쭅 �녿뒗
+   泥� 寃��� �곹깭�먯꽌�� �꾨옒�� �꾨Т寃껊룄 �놁쑝誘�濡� �좊룄 �꾩슂 �녿떎. */
 .user-view-live-suggestions.has-stale-result {
   padding-bottom: 28px;
   border-bottom: 1px solid var(--border);
@@ -326,8 +326,8 @@
 }
 
 .user-view-icon-btn.is-stop:hover {
-  /* 다크 배경에서는 호버 시 어둡게 하는 대신 살짝 밝게 — 어두운 배경 위에서
-     더 어두워지면 텍스트 대비가 오히려 나빠진다 */
+  /* �ㅽ겕 諛곌꼍�먯꽌�� �몃쾭 �� �대몼寃� �섎뒗 ���� �댁쭩 諛앷쾶 �� �대몢�� 諛곌꼍 �꾩뿉��
+     �� �대몢�뚯�硫� �띿뒪�� ��鍮꾧� �ㅽ엳�� �섎튌吏꾨떎 */
   background: var(--stop-hover-bg);
   transform: none;
 }
@@ -365,8 +365,8 @@
   animation: rise-in 0.2s ease both;
 }
 
-/* 로딩 스피너 — 우리 로고 심볼을 그대로 돌려서 브랜드가 로딩 상태에도 드러나게 함.
-   원본 이미지가 완전 검정이라 opacity로 낮춰서 회색처럼 보이게 함. */
+/* 濡쒕뵫 �ㅽ뵾�� �� �곕━ 濡쒓퀬 �щ낵�� 洹몃�濡� �뚮젮�� 釉뚮옖�쒓� 濡쒕뵫 �곹깭�먮룄 �쒕윭�섍쾶 ��.
+   �먮낯 �대�吏�媛� �꾩쟾 寃��뺤씠�� opacity濡� ��떠�� �뚯깋泥섎읆 蹂댁씠寃� ��. */
 .spinner {
   width: 18px;
   height: 18px;
@@ -399,8 +399,8 @@
   flex-shrink: 0;
 }
 
-/* 사전 검사(preflight)가 rejected/needs_calibration으로 걸러서 파이프라인을 안 태운
-   경우의 안내 블록 — 에러는 아니라서 빨강 대신 중립 톤으로 차분하게. */
+/* �ъ쟾 寃���(preflight)媛� rejected/needs_calibration�쇰줈 嫄몃윭�� �뚯씠�꾨씪�몄쓣 �� �쒖슫
+   寃쎌슦�� �덈궡 釉붾줉 �� �먮윭�� �꾨땲�쇱꽌 鍮④컯 ���� 以묐┰ �ㅼ쑝濡� 李⑤텇�섍쾶. */
 .user-view-guidance {
   display: flex;
   flex-direction: column;
@@ -440,8 +440,8 @@
   transform: translateY(-1px);
 }
 
-/* 검색엔진의 "이 검색어에 대한 결과가 없어 다음으로 표시합니다" 안내와 같은 스타일 —
-   카드/배지 없이 평문으로, 보정된 검색어만 굵게 강조 */
+/* 寃��됱뿏吏꾩쓽 "�� 寃��됱뼱�� ���� 寃곌낵媛� �놁뼱 �ㅼ쓬�쇰줈 �쒖떆�⑸땲��" �덈궡�� 媛숈� �ㅽ��� ��
+   移대뱶/諛곗� �놁씠 �됰Ц�쇰줈, 蹂댁젙�� 寃��됱뼱留� 援듦쾶 媛뺤“ */
 .user-view-corrected-note {
   color: var(--text-muted);
   font-size: 13.5px;
@@ -456,9 +456,9 @@
   margin: 0 0 14px;
 }
 
-/* 시간 예산 안에서 잠정 판정된 경우("partial") 안내 — topic-note/corrected-note와는
-   별개 조건(analysis_status)이라 둘 다 살려둠. 왼쪽 강조선 대신 옅은 배경 톤만으로
-   구분해서 다른 카드들과 같은 언어를 쓴다. */
+/* �쒓컙 �덉궛 �덉뿉�� �좎젙 �먯젙�� 寃쎌슦("partial") �덈궡 �� topic-note/corrected-note����
+   蹂꾧컻 議곌굔(analysis_status)�대씪 �� �� �대젮��. �쇱そ 媛뺤“�� ���� �낆� 諛곌꼍 �ㅻ쭔�쇰줈
+   援щ텇�댁꽌 �ㅻⅨ 移대뱶�ㅺ낵 媛숈� �몄뼱瑜� �대떎. */
 .user-view-partial-note {
   width: 100%;
   margin: 0 0 18px;
@@ -513,7 +513,7 @@
   transition: background 0.15s ease;
 }
 
-/* 숫자 색만 바뀌던 걸 카드 배경까지 값에 따라 살짝 틴트해서 한눈에 더 잘 들어오게 함 */
+/* �レ옄 �됰쭔 諛붾�뚮뜕 嫄� 移대뱶 諛곌꼍源뚯� 媛믪뿉 �곕씪 �댁쭩 �댄듃�댁꽌 �쒕늿�� �� �� �ㅼ뼱�ㅺ쾶 �� */
 .score-card.score-high {
   background: var(--accent-soft);
 }
@@ -522,8 +522,8 @@
   background: var(--surface-2);
 }
 
-/* 판정 색을 "낮은 점수" 칸에만 선택적으로 물려준다 — 그 숫자가 지금 판정의
-   근거이기 때문. score-low와 함께만 쓰이므로 순서상 score-low 배경(default)을 덮는다. */
+/* �먯젙 �됱쓣 "��� �먯닔" 移몄뿉留� �좏깮�곸쑝濡� 臾쇰젮以��� �� 洹� �レ옄媛� 吏�湲� �먯젙��
+   洹쇨굅�닿린 �뚮Ц. score-low�� �④퍡留� �곗씠誘�濡� �쒖꽌�� score-low 諛곌꼍(default)�� ��뒗��. */
 .score-card.score-low.tone-amber {
   background: var(--amber-soft);
   border-color: transparent;
@@ -556,8 +556,8 @@
   margin: 0 0 18px;
 }
 
-/* 굵은 왼쪽 테두리 대신 그냥 본문 문단으로 — 지금은 클라이언트 요약이 아니라
-   백엔드가 실제로 근거로 쓴 rationale 원문이라 "인용구"처럼 강조할 필요가 없다. */
+/* 援듭� �쇱そ �뚮몢由� ���� 洹몃깷 蹂몃Ц 臾몃떒�쇰줈 �� 吏�湲덉� �대씪�댁뼵�� �붿빟�� �꾨땲��
+   諛깆뿏�쒓� �ㅼ젣濡� 洹쇨굅濡� �� rationale �먮Ц�대씪 "�몄슜援�"泥섎읆 媛뺤“�� �꾩슂媛� �녿떎. */
 .judgment-summary {
   width: 100%;
   margin: 0 0 18px;
@@ -598,7 +598,7 @@
 }
 
 .score-breakdown-toggle::after {
-  content: '⌄';
+  content: '��';
   color: var(--text-muted);
   font-size: 17px;
   font-weight: 700;
@@ -606,7 +606,7 @@
 }
 
 .score-breakdown[open] .score-breakdown-toggle::after {
-  content: '⌃';
+  content: '��';
 }
 
 .score-breakdown[open] .score-breakdown-toggle {
@@ -646,9 +646,12 @@
   line-height: 1.35;
 }
 
+/* .score-breakdown 而⑦뀒�대꼫 �먯껜�� padding:0�닿퀬 �먯떇�ㅼ씠 媛곸옄 margin: 12px 14px濡�
+   �щ갚�� 以��� �� �� 洹쒖튃�� �� �곕씪�� �쒕ぉ/由ъ뒪�멸� 諛뺤뒪 �쇱そ �앹뿉 洹몃�濡� 遺숈뼱�덈뜕
+   踰꾧렇瑜� �섏젙 (�ㅻⅨ �먯떇�ㅺ낵 �щ갚 �듭씪). */
 .structured-links {
   width: 100%;
-  margin-bottom: 24px;
+  margin: 4px 14px 14px;
 }
 
 .structured-link-list {
@@ -660,10 +663,11 @@
   gap: 6px;
 }
 
-/* 굵은 왼쪽 테두리(border-left) + 둥근 모서리 조합은 모서리가 이상하게 잘려 보이는
-   렌더링 버그가 있어서 전체적으로 안 쓰기로 했다 — 색 구분은 배경 없이 타입 글자
-   색만으로 준다. 지금은 "계산 근거" 안에 접혀 들어가는 검증용 디테일이라 톤도
-   차분하게 낮춰뒀다. */
+/* 援듭� �쇱そ �뚮몢由�(border-left) + �κ렐 紐⑥꽌由� 議고빀�� 紐⑥꽌由ш� �댁긽�섍쾶 �섎젮 蹂댁씠��
+   �뚮뜑留� 踰꾧렇媛� �덉뼱�� �꾩껜�곸쑝濡� �� �곌린濡� �덈떎 �� �� 援щ텇�� 諛곌꼍 �놁씠 ���� 湲���
+   �됰쭔�쇰줈 以���. (諛곌꼍 �댄듃瑜� �쒕룄�대뇬�붾뜲, �ш린�� 臾몃떒�� �ㅻ챸�� 湲멸쾶 �ㅼ뼱媛���
+   -soft �ㅼ씠 �띿뒪�� �꾩껜瑜� ��뼱踰꾨젮 �ㅽ엳�� 媛��낆꽦�� �⑥뼱議뚮떎 �� 洹몃옒�� �섎룎由�.)
+   吏�湲덉� "怨꾩궛 洹쇨굅" �덉뿉 �묓� �ㅼ뼱媛��� 寃�利앹슜 �뷀뀒�쇱씠�� �ㅻ룄 李⑤텇�섍쾶 ��떠����. */
 .structured-link {
   display: grid;
   grid-template-columns: max-content max-content 1fr;
@@ -731,12 +735,13 @@
   gap: 8px;
 }
 
+/* �쇱そ 援듭� �� ����, �낆� 諛곌꼍 �댄듃濡쒕쭔 "�곗뾽�� �ㅼ젣 �곗씠怨� �덈떎"�� �섎�瑜� 以��� ��
+   寃곌낵 �붾㈃ �꾩껜�� �� 泥닿퀎(洹몃┛=�댁냼/�ㅼ궗�� �뺤씤)�� �듭씪. */
 .adoption-use-item {
   padding: 11px 12px;
   border: 1px solid var(--border);
-  border-left: 3px solid var(--green);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: var(--green-soft);
 }
 
 .adoption-use-meta {
@@ -762,6 +767,12 @@
   line-height: 1.45;
 }
 
+.adoption-use-more-note {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .adoption-use-source {
   display: inline-block;
   margin-top: 8px;
@@ -771,12 +782,12 @@
   text-underline-offset: 2px;
 }
 
-/* 무채색 베이스 안에서 점수 크기에 따라 명암 강도로 신호를 준다 — 낮을수록 옅게,
-   높을수록 진한 포인트 컬러(블랙)로. 색상(hue)이 아니라 명도(lightness)로만 구분해서
-   "무채색+포인트 하나" 원칙은 그대로 유지한다. */
+/* 臾댁콈�� 踰좎씠�� �덉뿉�� �먯닔 �ш린�� �곕씪 紐낆븫 媛뺣룄濡� �좏샇瑜� 以��� �� ��쓣�섎줉 �낃쾶,
+   �믪쓣�섎줉 吏꾪븳 �ъ씤�� 而щ윭(釉붾옓)濡�. �됱긽(hue)�� �꾨땲�� 紐낅룄(lightness)濡쒕쭔 援щ텇�댁꽌
+   "臾댁콈��+�ъ씤�� �섎굹" �먯튃�� 洹몃�濡� �좎��쒕떎. */
 .score-value.score-low {
-  /* 다크 배경에선 "옅다"는 신호가 밝은 회색이 아니라 배경에 가까운 어두운
-     회색이어야 낮은 점수처럼 덜 도드라져 보인다 */
+  /* �ㅽ겕 諛곌꼍�먯꽑 "�낅떎"�� �좏샇媛� 諛앹� �뚯깋�� �꾨땲�� 諛곌꼍�� 媛�源뚯슫 �대몢��
+     �뚯깋�댁뼱�� ��� �먯닔泥섎읆 �� �꾨뱶�쇱졇 蹂댁씤�� */
   color: var(--score-low);
 }
 
@@ -808,11 +819,11 @@
   letter-spacing: -0.1px;
 }
 
-/* 판정 결과별 톤 — 갭(=이번 분석에서 제일 중요한 발견)은 앰버로, 이미 해소된 건
-   그린으로, 판단 보류는 무채색으로. green-soft/red-soft가 이미 색을 쓰고 있던 것과
-   맞춰서 label-gap/label-weak도 "장식"이 아니라 "의미 신호"로 색을 되살렸다 —
-   둘 다 같은 앰버 계열 채움을 쓰되, 약한 신호는 살짝 더 옅게 둬서 "같은 방향,
-   낮은 확신도"라는 게 느껴지게 한다. */
+/* �먯젙 寃곌낵蹂� �� �� 媛�(=�대쾲 遺꾩꽍�먯꽌 �쒖씪 以묒슂�� 諛쒓껄)�� �곕쾭濡�, �대� �댁냼�� 嫄�
+   洹몃┛�쇰줈, �먮떒 蹂대쪟�� 臾댁콈�됱쑝濡�. green-soft/red-soft媛� �대� �됱쓣 �곌퀬 �덈뜕 寃껉낵
+   留욎떠�� label-gap/label-weak�� "�μ떇"�� �꾨땲�� "�섎� �좏샇"濡� �됱쓣 �섏궡�몃떎 ��
+   �� �� 媛숈� �곕쾭 怨꾩뿴 梨꾩��� �곕릺, �쏀븳 �좏샇�� �댁쭩 �� �낃쾶 �ъ꽌 "媛숈� 諛⑺뼢,
+   ��� �뺤떊��"�쇰뒗 寃� �먭뺨吏�寃� �쒕떎. */
 .user-view-label.label-gap {
   color: var(--amber);
   background: var(--amber-soft);
@@ -844,16 +855,16 @@
   color: var(--text-muted);
   font-size: 14px;
   line-height: 1.65;
-  /* 가운데 정렬은 여러 줄 문단에서 줄마다 시작 위치가 들쭉날쭉해 보여서 왼쪽 정렬로 바꿈. */
+  /* 媛��대뜲 �뺣젹�� �щ윭 以� 臾몃떒�먯꽌 以꾨쭏�� �쒖옉 �꾩튂媛� �ㅼ춬�좎춬�� 蹂댁뿬�� �쇱そ �뺣젹濡� 諛붽퓞. */
   text-align: left;
-  /* 고정 560px로 캡을 걸어뒀던 걸 없앰 — 위 스코어 카드는 컨테이너 폭(min(90%,920px))에
-     맞춰 유동적으로 늘어나는데 문단만 항상 560px로 고정돼 있어서 화면 폭을 늘려도 안
-     바뀌는 것처럼 보였다. 이제 스코어 카드와 같은 폭으로 함께 늘어난다. */
+  /* 怨좎젙 560px濡� 罹≪쓣 嫄몄뼱���� 嫄� �놁빊 �� �� �ㅼ퐫�� 移대뱶�� 而⑦뀒�대꼫 ��(min(90%,920px))��
+     留욎떠 �좊룞�곸쑝濡� �섏뼱�섎뒗�� 臾몃떒留� ��긽 560px濡� 怨좎젙�� �덉뼱�� �붾㈃ ��쓣 �섎젮�� ��
+     諛붾�뚮뒗 寃껋쿂�� 蹂댁���. �댁젣 �ㅼ퐫�� 移대뱶�� 媛숈� ��쑝濡� �④퍡 �섏뼱�쒕떎. */
   width: 100%;
   margin: 0 0 24px;
 }
 
-/* 결과 화면 안에서 성격이 다른 구간(판정 설명 / 부가 설명 / 원자료)을 나누는 구분선 */
+/* 寃곌낵 �붾㈃ �덉뿉�� �깃꺽�� �ㅻⅨ 援ш컙(�먯젙 �ㅻ챸 / 遺�媛� �ㅻ챸 / �먯옄猷�)�� �섎늻�� 援щ텇�� */
 .section-divider {
   width: 100%;
   height: 1px;
@@ -861,7 +872,7 @@
   margin: 8px 0 24px;
 }
 
-/* 학술 용어 → 산업 검색어로 어떻게 연결했는지 보여주는 브릿지 노트 */
+/* �숈닠 �⑹뼱 �� �곗뾽 寃��됱뼱濡� �대뼸寃� �곌껐�덈뒗吏� 蹂댁뿬二쇰뒗 釉뚮┸吏� �명듃 */
 .user-view-bridge {
   width: 100%;
   background: var(--surface-2);
@@ -901,8 +912,8 @@
   line-height: 1.55;
 }
 
-/* 갭 판정 근거 세 갈래 — 연결됨/진짜 갭/연결될 여지. 왼쪽 컬러 바로만 구분하고
-   배경은 그대로 둬서 무채색 톤을 유지한다. */
+/* 媛� �먯젙 洹쇨굅 �� 媛덈옒 �� �곌껐��/吏꾩쭨 媛�/�곌껐�� �ъ�. �쇱そ 而щ윭 諛붾줈留� 援щ텇�섍퀬
+   諛곌꼍�� 洹몃�濡� �ъ꽌 臾댁콈�� �ㅼ쓣 �좎��쒕떎. */
 .user-view-connections {
   width: 100%;
   display: flex;
@@ -918,9 +929,9 @@
   padding: 12px 16px;
 }
 
-/* 굵은 왼쪽 테두리 대신, 옅은 배경 틴트와 제목 색만으로 톤을 구분한다.
-   판정 라벨의 색 체계(그린=해소, 앰버=갭)와 통일해서 "연계된 근거"만 색이 튀던
-   문제를 없앴다 — 잠재 가능성은 아직 판단 보류라는 뜻으로 무채색 유지. */
+/* 援듭� �쇱そ �뚮몢由� ����, �낆� 諛곌꼍 �댄듃�� �쒕ぉ �됰쭔�쇰줈 �ㅼ쓣 援щ텇�쒕떎.
+   �먯젙 �쇰꺼�� �� 泥닿퀎(洹몃┛=�댁냼, �곕쾭=媛�)�� �듭씪�댁꽌 "�곌퀎�� 洹쇨굅"留� �됱씠 ����
+   臾몄젣瑜� �놁빐�� �� �좎옱 媛��μ꽦�� �꾩쭅 �먮떒 蹂대쪟�쇰뒗 �살쑝濡� 臾댁콈�� �좎�. */
 .connection-group.tone-connected {
   background: var(--green-soft);
 }
@@ -930,8 +941,8 @@
 }
 
 .connection-group.tone-potential {
-  /* surface-2는 green-soft/amber-soft보다 훨씬 어두워서 세 카드를 나란히 두면
-     이 카드만 툭 꺼져 보였다 — 명도를 맞춰서 같은 세기의 무채색 톤으로 교체 */
+  /* surface-2�� green-soft/amber-soft蹂대떎 �⑥뵮 �대몢�뚯꽌 �� 移대뱶瑜� �섎��� �먮㈃
+     �� 移대뱶留� �� 爰쇱졇 蹂댁��� �� 紐낅룄瑜� 留욎떠�� 媛숈� �멸린�� 臾댁콈�� �ㅼ쑝濡� 援먯껜 */
   background: var(--accent-soft);
 }
 
@@ -940,6 +951,14 @@
   font-size: 13px;
   font-weight: 700;
   color: var(--text);
+}
+
+/* "紐낆떆�곸쑝濡� �뺤씤�� �ъ슜 洹쇨굅" �쒕ぉ�� �� �뱀뀡("李얠� �숈닠 洹쇨굅 (N媛�)" = .evidence-group-title)
+   怨� 媛숈� 湲��� �ш린쨌�щ갚�쇰줈 留욎땄 �� 媛숈� 湲됱쓽 �뱀뀡 �쒕ぉ�몃뜲 �고듃 �ш린媛� �щ씪��
+   �꾧퀎媛� �닿툔�� 蹂댁���. */
+.adoption-use-title {
+  font-size: 15px;
+  margin-bottom: 12px;
 }
 
 .connection-group.tone-connected .connection-group-title {
@@ -965,8 +984,8 @@
   line-height: 1.55;
 }
 
-/* 결과 화면에서 가장 실질적인 정보(실행 가능한 제안)라서 회색 카드들 사이에서
-   포인트 컬러로 확실히 도드라지게 한다 — 다른 카드는 다 무채색인데 여기만 강조 */
+/* 寃곌낵 �붾㈃�먯꽌 媛��� �ㅼ쭏�곸씤 �뺣낫(�ㅽ뻾 媛��ν븳 �쒖븞)�쇱꽌 �뚯깋 移대뱶�� �ъ씠�먯꽌
+   �ъ씤�� 而щ윭濡� �뺤떎�� �꾨뱶�쇱�寃� �쒕떎 �� �ㅻⅨ 移대뱶�� �� 臾댁콈�됱씤�� �ш린留� 媛뺤“ */
 .user-view-opportunities {
   width: 100%;
   background: var(--accent-soft);
@@ -1026,6 +1045,18 @@
   border-radius: var(--radius);
   padding: 16px 18px;
   margin-bottom: 24px;
+}
+
+/* �먯젙 �쇰꺼�� �� 怨꾩뿴�� �붿빟 諛뺤뒪源뚯� �낃쾶 �댁뼱以��� �� �쇱そ �좎씠�� 吏꾪븳 諛곌꼍 ����
+   湲곗〈 -soft �� 媛뺣룄 洹몃�濡�, �뚮몢由� �됰쭔 �④퍡 諛붽퓭�� "�� �먯젙怨� 媛숈� 怨꾩뿴"�꾩쓣
+   �쒕윭�몃떎. �꾩껜 諛곌꼍�� -soft濡� ��쑝硫� �덉뿉 �� 湲� �띿뒪�� ��鍮꾧� �⑥뼱�몄꽌
+   �뚮몢由ъ뿉留� �곸슜. */
+.final-synthesis.tone-amber {
+  border-color: var(--amber);
+}
+
+.final-synthesis.tone-green {
+  border-color: var(--green);
 }
 
 .final-synthesis-title {
@@ -1124,7 +1155,7 @@
   }
 }
 
-/* 찾은 논문/산업 도입 근거 목록 — 추상적인 점수 대신 실제로 확인 가능한 출처를 보여준다 */
+/* 李얠� �쇰Ц/�곗뾽 �꾩엯 洹쇨굅 紐⑸줉 �� 異붿긽�곸씤 �먯닔 ���� �ㅼ젣濡� �뺤씤 媛��ν븳 異쒖쿂瑜� 蹂댁뿬以��� */
 .user-view-evidence {
   width: 100%;
   display: flex;
@@ -1140,7 +1171,7 @@
   color: var(--text);
 }
 
-/* 근거 목록 페이지네이션 — "나머지 N개 더 보기"로 한 번에 다 펼치는 대신 5개씩 넘겨봄 */
+/* 洹쇨굅 紐⑸줉 �섏씠吏��ㅼ씠�� �� "�섎㉧吏� N媛� �� 蹂닿린"濡� �� 踰덉뿉 �� �쇱튂�� ���� 5媛쒖뵫 �섍꺼遊� */
 .evidence-pager {
   display: flex;
   align-items: center;
@@ -1153,22 +1184,14 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 34px;
+  height: 34px;
   background: var(--surface-2);
   border: 1px solid var(--border);
   color: var(--text);
   padding: 0;
   border-radius: 50%;
   transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
-}
-
-/* 로고 반쪽을 이전/다음 화살표로 씀 — 왼쪽 절반은 "(" 모양이라 이전, 오른쪽 절반은
-   ")" 모양이라 다음 화살표로 자연스럽게 읽힘 */
-.pager-logo-icon {
-  height: 12px;
-  width: auto;
-  filter: invert(var(--logo-invert));
 }
 
 .evidence-pager button:hover:not(:disabled) {
@@ -1198,7 +1221,7 @@
   gap: 10px;
 }
 
-/* 검색엔진 결과 카드처럼: 제목(링크) → 출처 도메인 → 스니펫 순서 */
+/* 寃��됱뿏吏� 寃곌낵 移대뱶泥섎읆: �쒕ぉ(留곹겕) �� 異쒖쿂 �꾨찓�� �� �ㅻ땲�� �쒖꽌 */
 .evidence-item {
   font-size: 14px;
   padding: 14px 16px;
@@ -1253,8 +1276,8 @@
   white-space: nowrap;
 }
 
-/* Liner 원본 시각화 — 우리 스코어 카드와 같은 숫자를 중복해서 보여주는 위젯이라
-   기본은 접어두고, 궁금한 사람만 펼쳐볼 수 있게 토글로 둔다. */
+/* Liner �먮낯 �쒓컖�� �� �곕━ �ㅼ퐫�� 移대뱶�� 媛숈� �レ옄瑜� 以묐났�댁꽌 蹂댁뿬二쇰뒗 �꾩젽�대씪
+   湲곕낯�� �묒뼱�먭퀬, 沅곴툑�� �щ엺留� �쇱퀜蹂� �� �덇쾶 �좉�濡� �붾떎. */
 .app-header {
   display: flex;
   align-items: center;
@@ -1262,7 +1285,7 @@
   padding: 14px 24px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
-  /* dev 화면은 로그가 길게 쌓이니 스크롤해도 탭/새로고침에 계속 손이 닿게 상단 고정 */
+  /* dev �붾㈃�� 濡쒓렇媛� 湲멸쾶 �볦씠�� �ㅽ겕濡ㅽ빐�� ��/�덈줈怨좎묠�� 怨꾩냽 �먯씠 �욧쾶 �곷떒 怨좎젙 */
   position: sticky;
   top: 0;
   z-index: 20;
@@ -1381,7 +1404,7 @@ main {
   background: var(--surface);
   font-size: 13px;
   color: var(--text-muted);
-  /* dev 화면에선 위에 app-header가 고정돼 있어 그 높이만큼 밀어서 겹치지 않게 함 */
+  /* dev �붾㈃�먯꽑 �꾩뿉 app-header媛� 怨좎젙�� �덉뼱 洹� �믪씠留뚰겮 諛��댁꽌 寃뱀튂吏� �딄쾶 �� */
   position: sticky;
   top: 58px;
   z-index: 19;
@@ -1389,7 +1412,7 @@ main {
 
 .app-clean .raw-stream-toolbar {
   padding: 16px 32px;
-  /* 세컨드 화면(클린 뷰)은 위에 헤더가 없어서 바로 맨 위에 고정 */
+  /* �몄빻�� �붾㈃(�대┛ 酉�)�� �꾩뿉 �ㅻ뜑媛� �놁뼱�� 諛붾줈 留� �꾩뿉 怨좎젙 */
   top: 0;
 }
 
@@ -1443,8 +1466,8 @@ main {
   border-right: 1px solid var(--border);
 }
 
-/* 헤더의 "사용자 화면" 링크(.clean-link)와 같은 크기/모양의 필(pill) 버튼으로 통일 —
-   같은 화면에 같이 보이는데 글씨 크기·모서리가 달라서 어색해 보이던 걸 맞춤. */
+/* �ㅻ뜑�� "�ъ슜�� �붾㈃" 留곹겕(.clean-link)�� 媛숈� �ш린/紐⑥뼇�� ��(pill) 踰꾪듉�쇰줈 �듭씪 ��
+   媛숈� �붾㈃�� 媛숈씠 蹂댁씠�붾뜲 湲��� �ш린쨌紐⑥꽌由ш� �щ씪�� �댁깋�� 蹂댁씠�� 嫄� 留욎땄. */
 .raw-stream-toolbar button {
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -1520,7 +1543,7 @@ main {
   letter-spacing: 0.2px;
 }
 
-/* 톤 배지: 무채색 기본 + tool_call만 포인트 컬러로 강조, error만 빨강(관례) 유지 */
+/* �� 諛곗�: 臾댁콈�� 湲곕낯 + tool_call留� �ъ씤�� 而щ윭濡� 媛뺤“, error留� 鍮④컯(愿�濡�) �좎� */
 .tone-accent {
   background: var(--accent-soft);
   color: var(--accent-2);
