@@ -183,6 +183,12 @@ function adoptionEvidenceRecords(result) {
   return result.adoption_evidence.filter((item) => item?.relation === 'uses')
 }
 
+function resultList(result, key) {
+  if (Array.isArray(result?.[key])) return result[key]
+  if (Array.isArray(result?.gap_candidate?.[key])) return result.gap_candidate[key]
+  return []
+}
+
 // 점수(0~100)를 명암 강도 클래스로 매핑 — 무채색 베이스 안에서 값이 클수록 진하게.
 function scoreTone(value) {
   if (typeof value !== 'number') return ''
@@ -397,6 +403,8 @@ export default function UserView() {
   const abortRef = useRef(null)
   const suggestAbortRef = useRef(null)
   const selectedSuggestionRef = useRef(null)
+  const confirmedBarriers = resultList(result, 'confirmed_barriers')
+  const inferredBarriers = resultList(result, 'inferred_barriers')
 
   useEffect(() => {
     disconnectRef.current = connectStream((event) => {
@@ -787,6 +795,8 @@ export default function UserView() {
             result.connected_points?.length > 0 ||
             result.gap_points?.length > 0 ||
             result.potential_points?.length > 0 ||
+            confirmedBarriers.length > 0 ||
+            inferredBarriers.length > 0 ||
             result.opportunity_suggestions?.length > 0) && <div className="section-divider" />}
 
           {result.vocabulary?.rationale && (
@@ -805,21 +815,25 @@ export default function UserView() {
             </div>
           )}
 
-          {/* 결과 화면의 핵심 — "무엇이 연결됐고, 무엇이 안 됐고, 뭘 더 볼 수 있는지".
-              예전엔 이 바로 아래에 link_type 기반 StructuredLinks와 barriers 섹션이
-              같은 내용을 또 다른 형식(유사도 %, 장벽 카드)으로 반복해서 사용자 입장에서
-              뭘 봐야 할지 뒤죽박죽이었다. barriers는 백엔드가 실제로 채워주는 자리와
-              프론트가 읽는 자리가 어긋나 있어 원래도 항상 비어 있던 죽은 코드라 제거하고,
-              StructuredLinks는 검증용 기술 디테일로 보고 맨 아래 "계산 근거"로 옮겼다. */}
+          {/* 결과 화면의 핵심 — "무엇이 연결됐고, 무엇이 안 됐고, 확인된 장벽은 무엇인지".
+              StructuredLinks는 검증용 기술 디테일로 보고 맨 아래 "계산 근거"에 둔다. */}
           {(result.connected_points?.length > 0 ||
             result.gap_points?.length > 0 ||
-            result.potential_points?.length > 0) && (
+            result.potential_points?.length > 0 ||
+            confirmedBarriers.length > 0 ||
+            inferredBarriers.length > 0) && (
             <div className="user-view-connections">
               {result.connected_points?.length > 0 && (
                 <ConnectionGroup tone="connected" title="연계된 근거" items={result.connected_points} />
               )}
               {result.gap_points?.length > 0 && (
                 <ConnectionGroup tone="gap" title="연계 안 된 부분 (GAP)" items={result.gap_points} />
+              )}
+              {confirmedBarriers.length > 0 && (
+                <ConnectionGroup tone="gap" title="확인된 장벽" items={confirmedBarriers} />
+              )}
+              {inferredBarriers.length > 0 && (
+                <ConnectionGroup tone="potential" title="추정 장벽" items={inferredBarriers} />
               )}
               {result.potential_points?.length > 0 && (
                 <ConnectionGroup
