@@ -176,6 +176,10 @@
 .user-view-fast-btn.is-on:hover:not(:disabled) {
   background: var(--accent-2);
   border-color: var(--accent-2);
+  /* :hover:not() 쪽 선택자가 .is-on보다 명시도가 높아서 이 규칙이 없으면
+     색이 var(--text)로 밀려 켜짐 상태에서 호버할 때 아이콘이 배경과
+     거의 같은 색이 돼 안 보였다 — 명시적으로 다시 지정해 되돌린다. */
+  color: var(--bg);
 }
 
 .user-view-fast-btn:disabled {
