@@ -79,6 +79,25 @@ function ArrowIcon() {
   )
 }
 
+// "이런 기회가 있습니다" 섹션용 반짝임 아이콘.
+function SparkIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4L12 2z" />
+    </svg>
+  )
+}
+
+// 근거 목록 페이지네이션용 좌/우 화살표.
+function ChevronIcon({ direction }) {
+  const points = direction === 'left' ? '14 6 8 12 14 18' : '10 6 16 12 10 18'
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points={points} />
+    </svg>
+  )
+}
+
 // 정지(■) 대신 취소를 뜻하는 X — 미디어 플레이어 맥락이 없으면 정지 아이콘은
 // 잘 안 읽힌다는 피드백이 있어서 바꿈.
 function StopIcon() {
@@ -111,6 +130,14 @@ function scholarItems(result) {
 function adoptionItems(result) {
   if (!Array.isArray(result?.adoption)) return []
   return result.adoption.flatMap((resp) => (Array.isArray(resp?.results) ? resp.results : []))
+}
+
+// 점수(0~100)를 명암 강도 클래스로 매핑 — 무채색 베이스 안에서 값이 클수록 진하게.
+function scoreTone(value) {
+  if (typeof value !== 'number') return ''
+  if (value >= 67) return 'score-high'
+  if (value >= 34) return 'score-mid'
+  return 'score-low'
 }
 
 // 검색엔진 결과처럼 링크 밑에 출처 도메인을 보여주기 위한 호스트명 추출.
@@ -199,14 +226,19 @@ function EvidenceGroup({ title, items, showCitation, page, onPageChange }) {
       </ul>
       {totalPages > 1 && (
         <div className="evidence-pager">
-          <button type="button" disabled={page === 0} onClick={() => onPageChange(page - 1)}>
-            이전
+          <button type="button" disabled={page === 0} onClick={() => onPageChange(page - 1)} aria-label="이전 페이지">
+            <ChevronIcon direction="left" />
           </button>
           <span className="evidence-pager-status">
             {page + 1} / {totalPages}
           </span>
-          <button type="button" disabled={page >= totalPages - 1} onClick={() => onPageChange(page + 1)}>
-            다음
+          <button
+            type="button"
+            disabled={page >= totalPages - 1}
+            onClick={() => onPageChange(page + 1)}
+            aria-label="다음 페이지"
+          >
+            <ChevronIcon direction="right" />
           </button>
         </div>
       )}
@@ -261,9 +293,17 @@ export default function UserView() {
   // 제출 전, 타이핑하는 동안 가볍게 /api/suggestions로 추천 검색어를 미리 보여준다.
   // 입력을 멈추고 잠깐(350ms) 있어야 호출해서, 한 글자씩 칠 때마다 요청이 나가진 않는다.
   useEffect(() => {
-    if (status !== 'idle' || topic.trim().length < 2) {
+    // 'running'일 때만 막는다 — 이전엔 'idle'이 아니면(=done/error) 다 막아서, 결과를
+    // 보고 있는 채로 입력을 고치면 추천도 안 뜨고 그렇다고 결과도 안 지워지는 어중간한
+    // 상태였다. 이제 결과는 그대로 화면에 남겨두면서 새로 타이핑하는 동안 추천이 뜬다.
+    if (status === 'running' || topic.trim().length < 2) {
       setLiveSuggestions([])
       setLiveGuidance(null)
+      // 이미 날아간 요청이 있으면 취소한다 — 안 그러면 입력을 지운 뒤에도 그 요청이
+      // 뒤늦게 응답으로 돌아와서 지웠던 안내 문구("검색어를 다시 확인해 주세요")를
+      // 되살려버린다. clearTimeout은 아직 안 나간 타이머만 막고, 이미 fetch가 나간
+      // 건 여기서 abort로 직접 끊어줘야 한다.
+      suggestAbortRef.current?.abort()
       return
     }
 
@@ -413,27 +453,25 @@ export default function UserView() {
       <div className="user-view-intro">
         <span className="user-view-kicker">
           <span className="radar-icon" />
-          Gap Radar
+          Gap Bridge
         </span>
-        <h1>Research-to-Reality Radar</h1>
-        <p>연구 분야·기술·산업 아이디어 중 하나를 입력하면, 학계 연구와 산업 적용 사이의 격차를 분석합니다.</p>
+        <div className="user-view-title-wrap">
+          <span className="ghost-text" aria-hidden="true">
+            BRIDGE
+          </span>
+          <h1>Bridge Agent</h1>
+        </div>
+        <p>
+          연구는 많지만, 산업으로 이어지는 기술은 많지 않습니다.
+          <br />
+          연구 주제나 산업 아이디어를 입력하면, AI가 그 사이의 격차를 분석하고 근거를 보여줍니다.
+        </p>
       </div>
 
       <form className="user-view-form" onSubmit={runAnalyze}>
         <input
           value={topic}
-          onChange={(e) => {
-            setTopic(e.target.value)
-            // 실시간 추천은 status === 'idle'일 때만 동작하는데, 분석이 끝나거나(done)
-            // 실패한(error) 뒤에는 status가 그 값에 그대로 머물러 있어서 다음 검색어를
-            // 이어서 타이핑해도 추천이 안 뜨는 문제가 있었다. 결과 화면을 보고 있다가
-            // 입력을 다시 건드리기 시작하면 새 시도로 보고 idle로 되돌린다.
-            if (status === 'done' || status === 'error') {
-              setStatus('idle')
-              setResult(null)
-              setErrorMsg(null)
-            }
-          }}
+          onChange={(e) => setTopic(e.target.value)}
           placeholder={`예: ${topicExample}`}
           disabled={status === 'running'}
         />
@@ -460,7 +498,7 @@ export default function UserView() {
         )}
       </form>
 
-      {status === 'idle' && liveSuggestions.length > 0 && (
+      {status !== 'running' && liveSuggestions.length > 0 && (
         <div className="user-view-live-suggestions">
           <span className="live-suggestions-label">추천 검색어</span>
           <div className="user-view-suggestions">
@@ -475,7 +513,7 @@ export default function UserView() {
 
       {/* 제출도 하기 전에 이 검색어로는 안 될 것 같다는 걸 미리 알려준다 — 버튼 눌러서
           결과 화면까지 가야 알게 되는 것보다 지금 바로 아는 게 낫다. */}
-      {status === 'idle' && liveSuggestions.length === 0 && liveGuidance && (
+      {status !== 'running' && liveSuggestions.length === 0 && liveGuidance && (
         <div className="user-view-live-guidance">{liveGuidance}</div>
       )}
 
@@ -546,15 +584,21 @@ export default function UserView() {
           <div className="user-view-scores">
             <div className="score-card">
               <span className="score-label">연구는 얼마나 진행됐나</span>
-              <span className="score-value">{result.scores?.evidence_maturity ?? '-'}</span>
+              <span className={`score-value ${scoreTone(result.scores?.evidence_maturity)}`}>
+                {typeof result.scores?.evidence_maturity === 'number' ? `${result.scores.evidence_maturity}%` : '-'}
+              </span>
             </div>
             <div className="score-card">
               <span className="score-label">실제로 쓰이고 있나</span>
-              <span className="score-value">{result.scores?.adoption_evidence ?? '-'}</span>
+              <span className={`score-value ${scoreTone(result.scores?.adoption_evidence)}`}>
+                {typeof result.scores?.adoption_evidence === 'number' ? `${result.scores.adoption_evidence}%` : '-'}
+              </span>
             </div>
             <div className="score-card">
               <span className="score-label">판정 신뢰도</span>
-              <span className="score-value">{result.scores?.coverage_confidence ?? '-'}</span>
+              <span className={`score-value ${scoreTone(result.scores?.coverage_confidence)}`}>
+                {typeof result.scores?.coverage_confidence === 'number' ? `${result.scores.coverage_confidence}%` : '-'}
+              </span>
             </div>
           </div>
 
@@ -632,6 +676,20 @@ export default function UserView() {
               {result.inferred_barriers?.length > 0 && (
                 <ConnectionGroup tone="potential" title="추론된 장벽" items={result.inferred_barriers} />
               )}
+          {/* 관찰(potential_points)에서 한 단계 더 나가서 "그럼 뭘 만들면 되는지" 실행
+              가능한 제안까지 준다 — 결과 화면에서 가장 실질적인 정보라 포인트 컬러로
+              강조해서 다른 회색 카드들 사이에서 눈에 띄게 한다. */}
+          {result.opportunity_suggestions?.length > 0 && (
+            <div className="user-view-opportunities">
+              <h3 className="opportunities-title">
+                <SparkIcon />
+                이런 기회가 있습니다
+              </h3>
+              <ul className="opportunities-list">
+                {result.opportunity_suggestions.map((text, i) => (
+                  <li key={i}>{text}</li>
+                ))}
+              </ul>
             </div>
           )}
 

@@ -140,7 +140,7 @@
   background: var(--accent-soft);
   padding: 6px 14px 6px 10px;
   border-radius: 999px;
-  margin-bottom: 18px;
+  margin-bottom: 26px;
 }
 
 .radar-icon {
@@ -179,17 +179,43 @@
   }
 }
 
+/* 제목 뒤에 큰 회색 "RADAR" 고스트 텍스트를 깔아서 그래픽적인 느낌을 줌 */
+.user-view-title-wrap {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  overflow: hidden;
+  margin-bottom: 18px;
+}
+
+.ghost-text {
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'Archivo Black', sans-serif;
+  font-size: 90px;
+  color: var(--border);
+  white-space: nowrap;
+  z-index: 0;
+  user-select: none;
+}
+
 .user-view-intro h1 {
-  font-size: 32px;
-  font-weight: 800;
-  letter-spacing: -0.6px;
-  margin: 0 0 12px;
+  position: relative;
+  z-index: 1;
+  font-family: 'Archivo Black', 'Pretendard Variable', sans-serif;
+  font-size: 42px;
+  font-weight: 400;
+  letter-spacing: -0.8px;
+  margin: 0;
   color: var(--text);
 }
 
 .user-view-intro p {
   color: var(--text-muted);
   font-size: 15px;
+  line-height: 1.4;
   margin: 0;
 }
 
@@ -399,7 +425,7 @@
   color: var(--text-muted);
   font-size: 13.5px;
   text-align: center;
-  margin: 0 0 20px;
+  margin: 0 0 32px;
 }
 
 .user-view-partial-note {
@@ -557,6 +583,21 @@
   line-height: 1.45;
 }
 
+/* 무채색 베이스 안에서 점수 크기에 따라 명암 강도로 신호를 준다 — 낮을수록 옅게,
+   높을수록 진한 포인트 컬러(블랙)로. 색상(hue)이 아니라 명도(lightness)로만 구분해서
+   "무채색+포인트 하나" 원칙은 그대로 유지한다. */
+.score-value.score-low {
+  color: #b3b3b3;
+}
+
+.score-value.score-mid {
+  color: var(--text-muted);
+}
+
+.score-value.score-high {
+  color: var(--accent-2);
+}
+
 .user-view-label {
   font-weight: 700;
   font-size: 14.5px;
@@ -616,7 +657,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 14px 16px;
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 
 .bridge-title {
@@ -667,17 +708,22 @@
   padding: 12px 16px;
 }
 
+/* 왼쪽 테두리만 색이 있고 배경은 흰색이라 좀 밋밋해 보이던 걸, 같은 톤으로 아주 옅게
+   배경도 틴트해서 카드 하나하나가 더 완성된 느낌이 나게 함 */
 .connection-group.tone-connected {
   border-left-color: var(--green);
+  background: var(--green-soft);
 }
 
 .connection-group.tone-gap {
   border-left-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .connection-group.tone-potential {
   border-left-color: var(--slate);
   border-left-style: dashed;
+  background: var(--surface-2);
 }
 
 .connection-group-title {
@@ -710,6 +756,60 @@
   line-height: 1.55;
 }
 
+/* 결과 화면에서 가장 실질적인 정보(실행 가능한 제안)라서 회색 카드들 사이에서
+   포인트 컬러로 확실히 도드라지게 한다 — 다른 카드는 다 무채색인데 여기만 강조 */
+.user-view-opportunities {
+  width: 100%;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin-bottom: 24px;
+}
+
+.opportunities-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--accent-2);
+}
+
+.opportunities-title svg {
+  flex-shrink: 0;
+}
+
+.opportunities-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.opportunities-list li {
+  position: relative;
+  padding-left: 16px;
+  color: var(--text);
+  font-size: 13.5px;
+  line-height: 1.6;
+  font-weight: 500;
+}
+
+.opportunities-list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
 /* 찾은 논문/산업 도입 근거 목록 — 추상적인 점수 대신 실제로 확인 가능한 출처를 보여준다 */
 .user-view-evidence {
   width: 100%;
@@ -736,29 +836,34 @@
 }
 
 .evidence-pager button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
   background: var(--surface-2);
   border: 1px solid var(--border);
   color: var(--text);
-  font-weight: 600;
-  font-size: 12.5px;
-  padding: 5px 14px;
-  border-radius: 999px;
-  transition: border-color 0.15s ease, color 0.15s ease;
+  padding: 0;
+  border-radius: 50%;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
 }
 
 .evidence-pager button:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent-2);
+  background: var(--accent-soft);
 }
 
 .evidence-pager button:disabled {
-  opacity: 0.4;
+  opacity: 0.35;
   cursor: default;
 }
 
 .evidence-pager-status {
-  color: var(--text-muted);
-  font-size: 12px;
+  color: var(--text);
+  font-weight: 700;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 
