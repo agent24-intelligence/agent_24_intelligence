@@ -59,6 +59,19 @@ const GAP_TYPE_TEXT = {
   outcome_gap: '운영은 확인됐지만 연구 효과와 결과가 다름',
 }
 
+const USAGE_CONTEXT_TEXT = {
+  vendor_product_integration: '제품·서비스 기능',
+  vendor_internal_use: '내부 운영',
+  end_user_use: '현장 사용',
+}
+
+const ADOPTION_STAGE_TEXT = {
+  pilot: '파일럿',
+  limited_deployment: '제한 운영',
+  production: '정식 운영',
+  unknown: '단계 미확인',
+}
+
 // 입력창 예시 — 매번 하나를 랜덤으로 보여준다. 전부 "학술 연구는 있는데 산업 도입은
 // 불확실한" 기술/방법론 예시로만 구성 (파이프라인이 실제로 다루는 범위와 일치시킴).
 const TOPIC_EXAMPLES = [
@@ -153,6 +166,11 @@ function scholarItems(result) {
 function adoptionItems(result) {
   if (!Array.isArray(result?.adoption)) return []
   return result.adoption.flatMap((resp) => (Array.isArray(resp?.results) ? resp.results : []))
+}
+
+function adoptionEvidenceRecords(result) {
+  if (!Array.isArray(result?.adoption_evidence)) return []
+  return result.adoption_evidence.filter((item) => item?.relation === 'uses')
 }
 
 // 점수(0~100)를 명암 강도 클래스로 매핑 — 무채색 베이스 안에서 값이 클수록 진하게.
@@ -260,6 +278,49 @@ function StructuredLinks({ links }) {
   )
 }
 
+function AdoptionUseEvidence({ records }) {
+  const visible = Array.isArray(records) ? records.slice(0, 5) : []
+  return (
+    <div className={`adoption-use-evidence ${visible.length === 0 ? 'adoption-use-evidence-empty' : ''}`}>
+      <h3 className="connection-group-title">명시적으로 확인된 사용 근거</h3>
+      {visible.length === 0 ? (
+        <p className="adoption-use-empty-text">
+          사용 주체와 적용 맥락이 함께 확인된 산업 도입 근거는 없습니다.
+        </p>
+      ) : (
+        <ul className="adoption-use-list">
+          {visible.map((item) => {
+            const subject = item.subject_raw || item.subject_canonical || '사용 주체 미확인'
+            const locus =
+              item.project_name ||
+              item.deployment_unit ||
+              item.use_case_raw ||
+              item.context_raw ||
+              '적용 맥락 미확인'
+            const stage = ADOPTION_STAGE_TEXT[item.adoption_stage] || '단계 미확인'
+            const context = USAGE_CONTEXT_TEXT[item.usage_context] || '맥락 미확인'
+            return (
+              <li key={item.record_id || `${subject}-${item.evidence_span}`} className="adoption-use-item">
+                <div className="adoption-use-meta">
+                  <span>사용 주체: {subject}</span>
+                  <span>적용 위치: {locus}</span>
+                  <span>{context} · {stage}</span>
+                </div>
+                {item.evidence_span && <p className="adoption-use-quote">{item.evidence_span}</p>}
+                {item.source_url && (
+                  <a className="adoption-use-source" href={item.source_url} target="_blank" rel="noreferrer">
+                    {item.source_title || item.source_url}
+                  </a>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 const EVIDENCE_PAGE_SIZE = 5
 
 // 학술/산업 근거 목록을 5개씩 페이지로 끊어서 보여준다. "나머지 다 보기"로 한 번에
@@ -346,6 +407,7 @@ export default function UserView() {
   const disconnectRef = useRef(null)
   const abortRef = useRef(null)
   const suggestAbortRef = useRef(null)
+  const selectedSuggestionRef = useRef(null)
 
   useEffect(() => {
     disconnectRef.current = connectStream((event) => {
@@ -408,10 +470,13 @@ export default function UserView() {
     return () => clearTimeout(timer)
   }, [topic, status, result?.status])
 
-  async function runAnalyze(e, topicOverride) {
+  async function runAnalyze(e, topicOverride, options = {}) {
     e?.preventDefault()
     const topicToRun = topicOverride ?? topic
     if (!topicToRun.trim()) return
+    const selectedSuggestion = selectedSuggestionRef.current?.trim()
+    const acceptedRecommendation =
+      Boolean(options.acceptedRecommendation || (selectedSuggestion && topicToRun.trim() === selectedSuggestion))
     // 결과가 이미 떠 있는 상태에서 입력을 안 고치고 그대로 화살표를 또 누르면, 방금과
     // 똑같은 요청을 API 비용 들여가며 한 번 더 돌리게 된다. 직전에 성공한 주제와
     // 완전히 같으면 그냥 지금 보이는 결과를 유지하고 재요청은 건너뛴다.
@@ -433,7 +498,12 @@ export default function UserView() {
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic: topicToRun, max_results: 10, fast_mode: fastMode }),
+        body: JSON.stringify({
+          topic: topicToRun,
+          max_results: 10,
+          fast_mode: fastMode,
+          accepted_recommendation: acceptedRecommendation,
+        }),
         signal: controller.signal,
       })
 
@@ -481,12 +551,14 @@ export default function UserView() {
 
   // 사전 검사에서 온 추천 검색어 칩을 클릭하면 그 주제로 바로 다시 분석을 돌린다.
   function runWithSuggestion(rec) {
-    runAnalyze(null, rec)
+    selectedSuggestionRef.current = rec
+    runAnalyze(null, rec, { acceptedRecommendation: true })
   }
 
   // 타이핑 중 뜬 실시간 추천은 아직 제출 전이라, 클릭하면 입력창만 채우고
   // 사용자가 직접 확인 후 제출하도록 둔다 (바로 분석을 돌리지 않음).
   function applySuggestion(rec) {
+    selectedSuggestionRef.current = rec
     setTopic(rec)
     setLiveSuggestions([])
     setLiveGuidance(null)
@@ -776,6 +848,8 @@ export default function UserView() {
               )}
             </div>
           )}
+
+          <AdoptionUseEvidence records={adoptionEvidenceRecords(result)} />
 
           <StructuredLinks links={result.gap_candidate?.links || result.links} />
 

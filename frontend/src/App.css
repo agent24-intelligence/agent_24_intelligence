@@ -560,9 +560,11 @@
 }
 
 .score-breakdown {
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  padding: 11px 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0;
+  overflow: hidden;
 }
 
 .score-breakdown-toggle {
@@ -571,6 +573,8 @@
   justify-content: space-between;
   cursor: pointer;
   list-style: none;
+  min-height: 46px;
+  padding: 0 14px;
 }
 
 .score-breakdown-toggle::-webkit-details-marker {
@@ -578,15 +582,19 @@
 }
 
 .score-breakdown-toggle::after {
-  content: '+';
+  content: '⌄';
   color: var(--text-muted);
-  font-size: 18px;
-  font-weight: 400;
+  font-size: 17px;
+  font-weight: 700;
   line-height: 1;
 }
 
 .score-breakdown[open] .score-breakdown-toggle::after {
-  content: '\2212';
+  content: '⌃';
+}
+
+.score-breakdown[open] .score-breakdown-toggle {
+  border-bottom: 1px solid var(--border);
 }
 
 .score-breakdown .score-breakdown-label {
@@ -594,14 +602,14 @@
 }
 
 .score-breakdown-rationale {
-  margin: 12px 0 10px;
+  margin: 12px 14px 10px;
   color: var(--text-muted);
   font-size: 13px;
   line-height: 1.6;
 }
 
 .score-breakdown-list {
-  margin-top: 12px;
+  margin: 12px 14px 14px;
 }
 
 .gap-type-list,
@@ -674,6 +682,74 @@
 .structured-link-explanation {
   color: var(--text-muted);
   line-height: 1.45;
+}
+
+.adoption-use-evidence {
+  width: 100%;
+  margin-bottom: 24px;
+}
+
+.adoption-use-evidence-empty {
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.adoption-use-empty-text {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.adoption-use-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.adoption-use-item {
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--green);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.adoption-use-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.adoption-use-meta span {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 8px;
+}
+
+.adoption-use-quote {
+  margin: 9px 0 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.adoption-use-source {
+  display: inline-block;
+  margin-top: 8px;
+  color: var(--text);
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* 무채색 베이스 안에서 점수 크기에 따라 명암 강도로 신호를 준다 — 낮을수록 옅게,
