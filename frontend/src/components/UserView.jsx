@@ -10,9 +10,15 @@ const STAGE_LABEL = {
   scholar_scout: '학술 근거 검색하는 중',
   vocabulary_bridge: '산업 용어로 변환하는 중',
   adoption_scout: '산업 도입 사례 검색하는 중',
-  gap_candidate_generator: '갭 여부 판정하는 중',
+  academic_extraction: '학술 근거를 구조화하는 중',
+  research_clustering: '연구 적용 단위를 묶는 중',
+  adoption_extraction: '산업 도입 근거를 구조화하는 중',
+  adoption_clustering: '산업 도입 사건을 묶는 중',
+  cluster_linkage: '학술과 산업 사례를 연결하는 중',
+  score_calculation: '점수와 갭 유형을 계산하는 중',
   adversarial_verifier: '반증 검토하는 중',
   conditional_deep_research: '심층 조사하는 중',
+  finalization: '최종 판정을 정리하는 중',
   gap_map: '결과 정리하는 중',
 }
 
@@ -20,22 +26,37 @@ const STAGE_LABEL = {
 // 소개 문구("~분석합니다")와 톤을 맞춰서 정중체(합니다체)로 통일.
 const LABEL_TEXT = {
   gap_candidate: '아직 산업 현장에 적용되지 않았습니다',
-  weak_gap_candidate: '산업 적용이 다소 늦은 편입니다',
+  emerging_adoption: '산업 적용이 초기 단계입니다',
   insufficient_evidence: '판단할 근거가 아직 부족합니다',
   unconfirmed_field: '입력한 분야를 다시 확인해주세요',
   no_gap: '이미 산업에 도입되어 있습니다',
-  over_adopted: '연구보다 산업 적용이 앞서 있습니다',
 }
 
 // 결과 라벨을 의미에 맞는 톤으로 구분한다 (앰버 = 갭 시그널, 그린 = 해소/정리됨,
 // 레드 = 반대 방향 경고, 슬레이트 = 판단 보류) — 사용자가 한눈에 결과 성격을 읽도록.
 const LABEL_TONE = {
   gap_candidate: 'label-gap',
-  weak_gap_candidate: 'label-weak',
+  emerging_adoption: 'label-weak',
   insufficient_evidence: 'label-neutral',
   unconfirmed_field: 'label-neutral',
   no_gap: 'label-resolved',
-  over_adopted: 'label-alert',
+}
+
+const LINK_TYPE_TEXT = {
+  direct: '직접 연결',
+  partial: '부분 연결',
+  blocked: '도입 중단 또는 거절',
+  unlinked: '직접 연결 미확인',
+}
+
+const GAP_TYPE_TEXT = {
+  no_adoption_link: '직접 도입 연결 없음',
+  possible_no_adoption_link: '도입 연결 가능성은 있으나 검색 범위 부족',
+  stage_gap: '파일럿·제한 운영에서 정식 운영으로 이어지지 않음',
+  context_gap: '다른 산업·환경에서만 확인됨',
+  technology_substitution: '산업은 다른 기술로 같은 문제를 해결 중',
+  barrier_gap: '도입 중단·거절·금지 근거 확인',
+  outcome_gap: '운영은 확인됐지만 연구 효과와 결과가 다름',
 }
 
 // 입력창 예시 — 매번 하나를 랜덤으로 보여준다. 전부 "학술 연구는 있는데 산업 도입은
@@ -133,6 +154,26 @@ function ConnectionGroup({ tone, title, items }) {
       <ul className="connection-list">
         {items.map((text, i) => (
           <li key={i}>{text}</li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function StructuredLinks({ links }) {
+  if (!Array.isArray(links) || links.length === 0) return null
+  const visible = links.filter((link) => link.adoption_cluster_id || link.link_type !== 'unlinked')
+  if (visible.length === 0) return null
+  return (
+    <div className="structured-links">
+      <h3 className="connection-group-title">연구·산업 연결</h3>
+      <ul className="structured-link-list">
+        {visible.map((link) => (
+          <li key={link.link_id} className={`structured-link structured-link-${link.link_type}`}>
+            <span className="structured-link-type">{LINK_TYPE_TEXT[link.link_type] || link.link_type}</span>
+            <span className="structured-link-score">유사도 {Math.round((link.link_similarity || 0) * 100)}%</span>
+            {link.explanation && <span className="structured-link-explanation">{link.explanation}</span>}
+          </li>
         ))}
       </ul>
     </div>
@@ -495,6 +536,32 @@ export default function UserView() {
             </div>
           </div>
 
+          {result.gap_types?.length > 0 && (
+            <div className="gap-type-summary">
+              <span className="gap-type-summary-label">주요 갭</span>
+              <div className="gap-type-list">
+                {result.gap_types.map((gapType) => (
+                  <span key={gapType} className="gap-type-item">
+                    {GAP_TYPE_TEXT[gapType] || gapType}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {result.gap_candidate?.score_breakdown && (
+            <div className="score-breakdown">
+              <span className="score-breakdown-label">계산 근거</span>
+              <div className="score-breakdown-list">
+                {Object.entries(result.gap_candidate.score_breakdown).map(([name, breakdown]) => (
+                  <span key={name} className="score-breakdown-item">
+                    {name.replaceAll('_', ' ')} {breakdown.total}/100
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
           {result.rationale && <p className="user-view-rationale">{result.rationale}</p>}
 
           {result.vocabulary?.rationale && (
@@ -529,6 +596,19 @@ export default function UserView() {
                   title="추가로 연계될 여지가 있는 지점"
                   items={result.potential_points}
                 />
+              )}
+            </div>
+          )}
+
+          <StructuredLinks links={result.gap_candidate?.links || result.links} />
+
+          {(result.confirmed_barriers?.length > 0 || result.inferred_barriers?.length > 0) && (
+            <div className="user-view-connections">
+              {result.confirmed_barriers?.length > 0 && (
+                <ConnectionGroup tone="gap" title="확인된 장벽" items={result.confirmed_barriers} />
+              )}
+              {result.inferred_barriers?.length > 0 && (
+                <ConnectionGroup tone="potential" title="추론된 장벽" items={result.inferred_barriers} />
               )}
             </div>
           )}
