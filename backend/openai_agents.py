@@ -20,6 +20,23 @@ class ScopeDecision(BaseModel):
     rationale: str
 
 
+class InputPreflightResult(BaseModel):
+    status: Literal["ready", "auto_corrected", "needs_calibration", "rejected"]
+    reason_code: Literal[
+        "ready",
+        "typo_corrected",
+        "too_broad",
+        "too_narrow",
+        "unrecoverable_typo",
+        "gibberish",
+        "fictional_or_unverifiable",
+    ]
+    original_topic: str
+    resolved_topic: str
+    message: str
+    recommendations: list[str] = Field(default_factory=list, max_length=3)
+
+
 class ScholarQueryResult(BaseModel):
     query: str = Field(min_length=8)
     rationale: str
@@ -64,6 +81,30 @@ class ResearchAgents:
             ),
             output_type=ScopeDecision,
         )
+        self.input_preflight_agent = Agent(
+            name="input_preflight",
+            model=small_model,
+            instructions=(
+                "사용자 입력이 학계-산업 적용 갭 검색의 주제로 사용할 수 있는지 사전 판정한다. "
+                "반드시 다음 네 상태 중 하나를 반환한다: ready, auto_corrected, "
+                "needs_calibration, rejected.\n"
+                "철자·띄어쓰기·키보드 오타처럼 의도가 명확하고 의미가 변하지 않는 경우에만 "
+                "auto_corrected로 분류하고 resolved_topic에 올바른 주제를 쓴다. 예: "
+                "'거댜언어모델' → '거대 언어 모델'. 애매한 전문용어를 임의로 만들어내거나 "
+                "의미를 확장하지 않는다.\n"
+                "복구할 수 없는 오타, 무의미한 문자열, 말이 안 되는 문장, 확인할 수 없는 "
+                "허구적 전제는 rejected로 분류한다. 이때 resolved_topic은 빈 문자열, "
+                "recommendations는 빈 배열로 반환하고 message는 '추천 검색어가 없어요. "
+                "검색어를 다시 확인해 주세요.'로 작성한다.\n"
+                "실제 기술·연구 주제지만 너무 넓거나 좁거나 구체화가 필요한 경우에는 "
+                "needs_calibration으로 분류한다. 명확한 주제인 ready와 자동 보정한 "
+                "auto_corrected도 포함해 rejected가 아닌 모든 상태에서 사용자가 선택할 수 "
+                "있는 자연어 추천 검색어를 1~3개 반드시 생성한다. 추천은 하위 기술, 적용 "
+                "환경, 방법론 또는 산업 맥락을 구체화해야 한다. 질문형이 아닌 기술명도 "
+                "유효한 입력으로 인정한다."
+            ),
+            output_type=InputPreflightResult,
+        )
         self.scholar_query_agent = Agent(
             name="scholar_query_generator",
             model=small_model,
@@ -106,6 +147,25 @@ class ResearchAgents:
             topic,
             stage="scope_calibrator",
             purpose="scope decision",
+        )
+
+    async def preflight(self, topic: str) -> InputPreflightResult:
+        prompt = json.dumps(
+            {
+                "topic": topic,
+                "task": (
+                    "Classify this input before any external research. Correct only an obvious "
+                    "typo without changing intent, reject inputs that cannot be interpreted, "
+                    "and always provide 1-3 user-facing recommendations unless rejected."
+                ),
+            },
+            ensure_ascii=False,
+        )
+        return await self._run(
+            self.input_preflight_agent,
+            prompt,
+            stage="input_preflight",
+            purpose="input validity and recommendation generation",
         )
 
     async def scholar_query(self, topic: str, scope: ScopeDecision) -> ScholarQueryResult:
