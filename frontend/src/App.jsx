@@ -41,7 +41,10 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <span className="app-title">AGENT:24 — dev</span>
+        <span className="app-title">
+          <img src="/logo-filled.png" alt="" className="brand-mark" />
+          AGENT:24 — dev
+        </span>
         <nav className="tabs">
           <button className={tab === 'stream' ? 'active' : ''} onClick={() => setTab('stream')}>
             Raw API Stream

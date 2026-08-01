@@ -125,79 +125,37 @@
 
 .user-view-intro {
   text-align: center;
-  margin-bottom: 44px;
+  margin-bottom: 52px;
 }
 
-.user-view-kicker {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 11.5px;
-  font-weight: 700;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
-  color: var(--accent-2);
-  background: var(--accent-soft);
-  padding: 6px 14px 6px 10px;
-  border-radius: 999px;
-  margin-bottom: 26px;
+/* 로고 마크 — kicker 배지, dev 헤더 등 작은 자리에 씀 */
+.brand-mark {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  display: block;
 }
 
-.radar-icon {
-  position: relative;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  border: 1.5px solid var(--accent-2);
-}
-
-.radar-icon::before,
-.radar-icon::after {
-  content: '';
-  position: absolute;
-  border-radius: 50%;
-  border: 1.5px solid var(--accent);
-  opacity: 0.55;
-  inset: -5px;
-  animation: radar-ping 2.2s ease-out infinite;
-}
-
-.radar-icon::after {
-  inset: -9px;
-  opacity: 0.3;
-  animation-delay: 0.5s;
-}
-
-@keyframes radar-ping {
-  0% {
-    transform: scale(0.55);
-    opacity: 0.55;
-  }
-  100% {
-    transform: scale(1.15);
-    opacity: 0;
-  }
-}
-
-/* 제목 뒤에 큰 회색 "RADAR" 고스트 텍스트를 깔아서 그래픽적인 느낌을 줌 */
+/* 제목 뒤에 로고 심볼을 크고 옅게 깔아서 그래픽적인 느낌을 줌 (배지+고스트 텍스트 대체).
+   overflow는 visible로 둬서 심볼이 타이틀 영역 위로 튀어나와도 안 잘리게 함. */
 .user-view-title-wrap {
   position: relative;
   display: flex;
   justify-content: center;
-  overflow: hidden;
+  align-items: center;
   margin-bottom: 18px;
 }
 
-.ghost-text {
+.ghost-symbol {
   position: absolute;
-  top: -14px;
+  top: -76px;
   left: 50%;
   transform: translateX(-50%);
-  font-family: 'Archivo Black', sans-serif;
-  font-size: 90px;
-  color: var(--border);
-  white-space: nowrap;
+  width: 270px;
+  height: 270px;
+  opacity: 0.08;
   z-index: 0;
+  pointer-events: none;
   user-select: none;
 }
 
@@ -235,6 +193,14 @@
   margin-top: -14px;
   margin-bottom: 36px;
   animation: rise-in 0.2s ease both;
+}
+
+/* 이전 결과를 그대로 보여준 채로 새로 타이핑할 때만, 지금 입력 중인 추천이랑 아래
+   예전 결과가 구분 안 되고 붙어 보일 수 있어서 구분선을 둔다. 결과가 아직 없는
+   첫 검색 상태에서는 아래에 아무것도 없으므로 선도 필요 없다. */
+.user-view-live-suggestions.has-stale-result {
+  padding-bottom: 28px;
+  border-bottom: 1px solid var(--border);
 }
 
 .live-suggestions-label {
@@ -328,30 +294,13 @@
   animation: rise-in 0.2s ease both;
 }
 
-/* 레이더 스윕 스피너 — 브랜드 컨셉("Radar")과 맞춘 로딩 표현 */
+/* 로딩 스피너 — 우리 로고 심볼을 그대로 돌려서 브랜드가 로딩 상태에도 드러나게 함.
+   원본 이미지가 완전 검정이라 opacity로 낮춰서 회색처럼 보이게 함. */
 .spinner {
-  position: relative;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: conic-gradient(from 0deg, var(--accent) 0deg, var(--accent) 55deg, transparent 100deg, transparent 360deg);
-  animation: spin 1s linear infinite;
-}
-
-.spinner::before {
-  content: '';
-  position: absolute;
-  inset: 2.5px;
-  border-radius: 50%;
-  background: var(--bg);
-}
-
-.spinner::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  border: 1px solid var(--border);
+  width: 18px;
+  height: 18px;
+  opacity: 0.45;
+  animation: spin 1.1s linear infinite;
 }
 
 @keyframes spin {
@@ -428,6 +377,15 @@
   margin: 0 0 32px;
 }
 
+.user-view-topic-note {
+  color: var(--text-muted);
+  font-size: 13.5px;
+  text-align: center;
+  margin: 0 0 14px;
+}
+
+/* 시간 예산 안에서 잠정 판정된 경우("partial") 안내 — topic-note/corrected-note와는
+   별개 조건(analysis_status)이라 둘 다 살려둠. border-radius를 안 줘서 밤티 이슈는 없음. */
 .user-view-partial-note {
   width: 100%;
   margin: 0 0 18px;
@@ -468,7 +426,7 @@
   grid-template-columns: repeat(3, 1fr);
   gap: 12px;
   width: 100%;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .score-card {
@@ -478,6 +436,16 @@
   border-radius: var(--radius);
   padding: 18px 16px 16px;
   text-align: center;
+  transition: background 0.15s ease;
+}
+
+/* 숫자 색만 바뀌던 걸 카드 배경까지 값에 따라 살짝 틴트해서 한눈에 더 잘 들어오게 함 */
+.score-card.score-high {
+  background: var(--accent-soft);
+}
+
+.score-card.score-mid {
+  background: var(--surface-2);
 }
 
 .score-label {
@@ -606,7 +574,7 @@
   border: 1px solid var(--border);
   padding: 7px 18px;
   border-radius: 999px;
-  margin-bottom: 24px;
+  margin-bottom: 30px;
   letter-spacing: -0.1px;
 }
 
@@ -648,6 +616,14 @@
      바뀌는 것처럼 보였다. 이제 스코어 카드와 같은 폭으로 함께 늘어난다. */
   width: 100%;
   margin: 0 0 24px;
+}
+
+/* 결과 화면 안에서 성격이 다른 구간(판정 설명 / 부가 설명 / 원자료)을 나누는 구분선 */
+.section-divider {
+  width: 100%;
+  height: 1px;
+  background: var(--border);
+  margin: 8px 0 24px;
 }
 
 /* 학술 용어 → 산업 검색어로 어떻게 연결했는지 보여주는 브릿지 노트 */
@@ -703,26 +679,20 @@
 .connection-group {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-left: 3px solid var(--border);
   border-radius: 10px;
   padding: 12px 16px;
 }
 
-/* 왼쪽 테두리만 색이 있고 배경은 흰색이라 좀 밋밋해 보이던 걸, 같은 톤으로 아주 옅게
-   배경도 틴트해서 카드 하나하나가 더 완성된 느낌이 나게 함 */
+/* 굵은 왼쪽 테두리 대신, 옅은 배경 틴트와 제목 색만으로 톤을 구분한다 */
 .connection-group.tone-connected {
-  border-left-color: var(--green);
   background: var(--green-soft);
 }
 
 .connection-group.tone-gap {
-  border-left-color: var(--accent);
   background: var(--accent-soft);
 }
 
 .connection-group.tone-potential {
-  border-left-color: var(--slate);
-  border-left-style: dashed;
   background: var(--surface-2);
 }
 
@@ -849,6 +819,13 @@
   transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
 }
 
+/* 로고 반쪽을 이전/다음 화살표로 씀 — 왼쪽 절반은 "(" 모양이라 이전, 오른쪽 절반은
+   ")" 모양이라 다음 화살표로 자연스럽게 읽힘 */
+.pager-logo-icon {
+  height: 12px;
+  width: auto;
+}
+
 .evidence-pager button:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent-2);
@@ -945,22 +922,14 @@
 }
 
 .app-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 800;
   font-size: 15px;
   letter-spacing: -0.2px;
   color: var(--text);
   white-space: nowrap;
-}
-
-.app-title::before {
-  content: '';
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--accent);
-  margin-right: 8px;
-  box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
 .tabs {
@@ -1157,7 +1126,7 @@ main {
   background: var(--surface);
   border: 1px solid var(--border);
   border-left: 3px solid var(--border);
-  border-radius: 10px;
+  border-radius: 0 10px 10px 0;
   padding: 12px 14px;
   margin-bottom: 10px;
   transition: border-left-color 0.15s ease;

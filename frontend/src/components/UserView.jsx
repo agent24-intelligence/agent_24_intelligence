@@ -88,23 +88,11 @@ function SparkIcon() {
   )
 }
 
-// 근거 목록 페이지네이션용 좌/우 화살표.
-function ChevronIcon({ direction }) {
-  const points = direction === 'left' ? '14 6 8 12 14 18' : '10 6 16 12 10 18'
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points={points} />
-    </svg>
-  )
-}
-
-// 정지(■) 대신 취소를 뜻하는 X — 미디어 플레이어 맥락이 없으면 정지 아이콘은
-// 잘 안 읽힌다는 피드백이 있어서 바꿈.
+// 중단 버튼 아이콘 — X 대신 모서리가 둥근 빈 사각형(정지 버튼의 부드러운 버전)으로.
 function StopIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="6" y1="6" x2="18" y2="18" />
-      <line x1="18" y1="6" x2="6" y2="18" />
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+      <rect x="3" y="3" width="18" height="18" rx="5" />
     </svg>
   )
 }
@@ -227,7 +215,7 @@ function EvidenceGroup({ title, items, showCitation, page, onPageChange }) {
       {totalPages > 1 && (
         <div className="evidence-pager">
           <button type="button" disabled={page === 0} onClick={() => onPageChange(page - 1)} aria-label="이전 페이지">
-            <ChevronIcon direction="left" />
+            <img src="/logo-filled-half-left.png" alt="" className="pager-logo-icon" />
           </button>
           <span className="evidence-pager-status">
             {page + 1} / {totalPages}
@@ -238,7 +226,7 @@ function EvidenceGroup({ title, items, showCitation, page, onPageChange }) {
             onClick={() => onPageChange(page + 1)}
             aria-label="다음 페이지"
           >
-            <ChevronIcon direction="right" />
+            <img src="/logo-filled-half-right.png" alt="" className="pager-logo-icon" />
           </button>
         </div>
       )}
@@ -458,14 +446,8 @@ export default function UserView() {
         </button>
       )}
       <div className="user-view-intro">
-        <span className="user-view-kicker">
-          <span className="radar-icon" />
-          Gap Bridge
-        </span>
         <div className="user-view-title-wrap">
-          <span className="ghost-text" aria-hidden="true">
-            BRIDGE
-          </span>
+          <img src="/logo-filled.png" alt="" className="ghost-symbol" aria-hidden="true" />
           <h1>Bridge Agent</h1>
         </div>
         <p>
@@ -506,7 +488,7 @@ export default function UserView() {
       </form>
 
       {status !== 'running' && !showPreflightGuidance && liveSuggestions.length > 0 && (
-        <div className="user-view-live-suggestions">
+        <div className={`user-view-live-suggestions${status === 'done' && result ? ' has-stale-result' : ''}`}>
           <span className="live-suggestions-label">추천 검색어</span>
           <div className="user-view-suggestions">
             {liveSuggestions.map((rec) => (
@@ -527,7 +509,7 @@ export default function UserView() {
       {status === 'running' && (
         <div className="user-view-progress">
           <div className="progress-main-row">
-            <span className="spinner" />
+            <img src="/logo-filled.png" alt="" className="spinner" />
             <span>{stage ? STAGE_LABEL[stage] || stage : '준비하는 중'}</span>
           </div>
           {/* 검색엔진처럼 지금 실제로 뭘 검색 중인지 보여준다 — 추상적인 단계 이름보다
@@ -562,13 +544,18 @@ export default function UserView() {
 
       {status === 'done' && result && result.status === 'completed' && (
         <div className="user-view-result">
-          {result.preflight?.status === 'auto_corrected' && (
+          {result.preflight?.status === 'auto_corrected' ? (
             // 검색엔진의 "이 검색어에 대한 결과가 없어 다음으로 표시합니다" 안내와 같은
             // 익숙한 패턴 — 카드/배지보다 이게 훨씬 신뢰가 가는 관용구라 그대로 따름.
+            // 이 문구 자체가 이미 어떤 주제로 검색했는지 알려주고 있어서 아래 별도 표시는 생략.
             <p className="user-view-corrected-note">
               <span>‘{result.input_topic}’에 대한 검색결과가 없어 다음에 대한 결과를 표시합니다:</span>{' '}
               <strong className="corrected-note-term">{result.topic}</strong>
             </p>
+          ) : (
+            // 결과를 띄운 채로 입력창을 다시 고칠 수 있게 해놔서, 지금 보이는 결과가
+            // 정확히 어떤 검색어에 대한 건지 표시해줘야 헷갈리지 않는다.
+            result.topic && <p className="user-view-topic-note">‘{result.topic}’ 검색 결과입니다.</p>
           )}
 
           {result.analysis_status === 'partial' && (
@@ -582,19 +569,19 @@ export default function UserView() {
           </div>
 
           <div className="user-view-scores">
-            <div className="score-card">
+            <div className={`score-card ${scoreTone(result.scores?.evidence_maturity)}`}>
               <span className="score-label">연구는 얼마나 진행됐나</span>
               <span className={`score-value ${scoreTone(result.scores?.evidence_maturity)}`}>
                 {typeof result.scores?.evidence_maturity === 'number' ? `${result.scores.evidence_maturity}%` : '-'}
               </span>
             </div>
-            <div className="score-card">
+            <div className={`score-card ${scoreTone(result.scores?.adoption_evidence)}`}>
               <span className="score-label">실제로 쓰이고 있나</span>
               <span className={`score-value ${scoreTone(result.scores?.adoption_evidence)}`}>
                 {typeof result.scores?.adoption_evidence === 'number' ? `${result.scores.adoption_evidence}%` : '-'}
               </span>
             </div>
-            <div className="score-card">
+            <div className={`score-card ${scoreTone(result.scores?.coverage_confidence)}`}>
               <span className="score-label">판정 신뢰도</span>
               <span className={`score-value ${scoreTone(result.scores?.coverage_confidence)}`}>
                 {typeof result.scores?.coverage_confidence === 'number' ? `${result.scores.coverage_confidence}%` : '-'}
@@ -629,6 +616,15 @@ export default function UserView() {
           )}
 
           {result.rationale && <p className="user-view-rationale">{result.rationale}</p>}
+
+          {/* 판정 설명(라벨/점수/rationale)과 그 아래 보조 설명 묶음을 구분선으로 나눈다 —
+              전부 텍스트/카드가 이어 붙어있으면 어디까지가 "판정"이고 어디부터가
+              "부가 설명"인지 눈으로 구분이 잘 안 됐다. */}
+          {(result.vocabulary?.rationale ||
+            result.connected_points?.length > 0 ||
+            result.gap_points?.length > 0 ||
+            result.potential_points?.length > 0 ||
+            result.opportunity_suggestions?.length > 0) && <div className="section-divider" />}
 
           {result.vocabulary?.rationale && (
             <div className="user-view-bridge">
@@ -700,7 +696,11 @@ export default function UserView() {
             const adoption = adoptionItems(result)
             if (scholar.length === 0 && adoption.length === 0) return null
             return (
-              <div className="user-view-evidence">
+              <>
+                {/* 여기까지는 우리 판정/해석이고, 여기부터는 그 판정에 쓴 원문 근거(링크) —
+                    "해석"과 "원자료"를 구분선으로 나눠서 성격이 다르다는 걸 보여준다. */}
+                <div className="section-divider" />
+                <div className="user-view-evidence">
                 {scholar.length > 0 && (
                   <EvidenceGroup
                     title="찾은 학술 근거"
@@ -718,7 +718,8 @@ export default function UserView() {
                     onPageChange={(p) => setEvidencePage((v) => ({ ...v, adoption: p }))}
                   />
                 )}
-              </div>
+                </div>
+              </>
             )
           })()}
 
