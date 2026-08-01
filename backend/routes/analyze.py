@@ -56,7 +56,7 @@ async def analyze(request: AnalyzeRequest):
             status_code=504,
             content={
                 "error": "pipeline_timeout",
-                "message": f"분석이 {int(PIPELINE_TIMEOUT_S)}초 넘게 걸려서 중단했어요. 더 구체적인 기술/방법론으로 다시 시도해주세요.",
+                "message": f"분석이 {int(PIPELINE_TIMEOUT_S)}초를 넘겨 중단되었습니다. 더 구체적인 기술/방법론으로 다시 시도해주세요.",
             },
         )
     except Exception as exc:
