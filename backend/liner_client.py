@@ -17,6 +17,7 @@ class LinerClient:
         self.base_url = (base_url or os.environ.get("LINER_API_BASE_URL", "https://platform.liner.com")).rstrip("/")
         self.api_key = api_key or os.environ.get("LINER_API_KEY", "")
         self.timeout = timeout
+        self.search_agent_timeout = float(os.environ.get("SEARCH_AGENT_TIMEOUT_S", "25"))
 
     async def search_web(
         self,
@@ -75,7 +76,7 @@ class LinerClient:
             body=body,
             stage=stage,
             name="search_agent",
-            timeout_s=self.timeout,
+            timeout_s=self.search_agent_timeout,
         )
 
     async def deep_research(
