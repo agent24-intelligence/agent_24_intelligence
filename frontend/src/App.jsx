@@ -38,9 +38,11 @@ export default function App() {
         </a>
       </header>
       <main>
-        {tab === 'stream' && <RawStream />}
-        {tab === 'test' && <ApiTester />}
-        {tab === 'gapmap' && <GapMap />}
+        <div className="content-max">
+          {tab === 'stream' && <RawStream />}
+          {tab === 'test' && <ApiTester />}
+          {tab === 'gapmap' && <GapMap />}
+        </div>
       </main>
     </div>
   )

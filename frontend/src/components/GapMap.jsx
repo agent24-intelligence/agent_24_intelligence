@@ -41,6 +41,8 @@ export default function GapMap() {
 
   return (
     <div className="gap-map">
+      <div className="gap-map-caption">OpenAI 판정 결과를 Liner Visualization으로 최종 표현</div>
+
       {!artifact && !error && (
         <div className="empty-hint">
           {waiting ? 'Gap Map 렌더링 대기 중 (평균 20~30초)...' : '아직 시각화 없음. 파이프라인이 visualization 단계에 도달하면 여기 뜬다.'}

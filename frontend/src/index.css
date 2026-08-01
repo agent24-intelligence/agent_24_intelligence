@@ -1,6 +1,27 @@
 :root {
-  color-scheme: dark;
-  font: 15px/1.5 ui-monospace, 'SF Mono', Consolas, monospace;
+  color-scheme: light;
+  font: 15px/1.6 'Pretendard', system-ui, 'Segoe UI', Roboto, sans-serif;
+
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --border: #e2e5eb;
+  --text: #1a1d24;
+  --text-muted: #697086;
+
+  --accent: #2563eb;
+  --accent-soft: #eaf0fe;
+
+  --blue: #2563eb;
+  --green: #0f9d67;
+  --red: #e0363f;
+  --amber: #b5790a;
+  --teal: #0f8b8b;
+  --cyan: #0e7fa8;
+  --slate: #5b6172;
+
+  --mono: ui-monospace, 'SF Mono', Consolas, monospace;
+  --shadow: 0 1px 2px rgba(20, 22, 30, 0.04), 0 4px 14px rgba(20, 22, 30, 0.05);
+  --content-width: 1180px;
 }
 
 * {
@@ -9,8 +30,8 @@
 
 body {
   margin: 0;
-  background: #0b0c10;
-  color: #e5e7eb;
+  background: var(--bg);
+  color: var(--text);
 }
 
 #root {
