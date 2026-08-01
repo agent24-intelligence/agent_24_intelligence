@@ -21,8 +21,16 @@ try:
     import agents as _agents  # noqa: F401
 except ModuleNotFoundError:
     _agents = types.ModuleType("agents")
-    _agents.Agent = type("Agent", (), {})
-    _agents.Runner = type("Runner", (), {})
+
+    class _DummyAgent:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class _DummyRunner:
+        pass
+
+    _agents.Agent = _DummyAgent
+    _agents.Runner = _DummyRunner
     sys.modules["agents"] = _agents
 
 from agent_pipeline import (  # noqa: E402
@@ -45,6 +53,7 @@ from evidence_logic import (  # noqa: E402
     calculate_adoption_evidence,
     classify_final_label,
     make_cluster_link,
+    should_start_final_synthesis,
 )
 from evidence_models import AdoptionCluster, ResearchCluster  # noqa: E402
 from input_gate import looks_too_broad_for_demo  # noqa: E402
@@ -199,6 +208,20 @@ def test_subject_extraction_keeps_operator_subject_and_rejects_query_as_subject(
     assert _trusted_industry_subject({**operator_item, "url": "https://news.example.com/acme"}) is None
 
 
+def test_duplicate_query_tokens_do_not_fake_specific_topic_overlap():
+    generic_rag_production_page = {
+        "url": "https://coralogix.com/ai-blog/rag-in-production-deployment-strategies-and-practical-considerations/",
+        "title": "RAG in Production: Deployment Strategies & Practical Considerations",
+        "snippet": "",
+        "query": "RAG Systems RAG Pipeline Management production deployment",
+    }
+    title_text = generic_rag_production_page["title"]
+
+    assert _has_query_overlap(generic_rag_production_page, title_text) is False
+    assert _looks_like_industry_adoption_result(generic_rag_production_page) is False
+    assert _fallback_adoption_records([generic_rag_production_page], set()) == []
+
+
 def test_broad_gate_calibrates_ai_without_a_topic_alias_allowlist():
     assert looks_too_broad_for_demo("AI") is True
     assert looks_too_broad_for_demo("LLM 양자화") is False
@@ -267,3 +290,9 @@ def test_no_gap_analysis_does_not_turn_candidate_dimensions_into_barriers():
     }
 
     assert _deterministic_inferred_barriers(analysis) == []
+
+
+def test_insufficient_evidence_does_not_start_final_synthesis():
+    assert should_start_final_synthesis("completed", "insufficient_evidence") is False
+    assert should_start_final_synthesis("completed", "unconfirmed_field") is False
+    assert should_start_final_synthesis("completed", "no_gap") is True

@@ -725,6 +725,14 @@ class ResearchPipeline:
             if not item or not extraction.evidence_span or not technology_canonical or not subject_canonical:
                 rejected_count += 1
                 continue
+            source_claim_text = " ".join(
+                str(value or "")
+                for value in (
+                    item.get("title"),
+                    item.get("snippet"),
+                    extraction.evidence_span,
+                )
+            )
             claim_text = " ".join(
                 str(value or "")
                 for value in (
@@ -736,10 +744,10 @@ class ResearchPipeline:
                     extraction.context_raw,
                 )
             )
-            if extraction.relation == "uses" and not _has_query_overlap(item, claim_text):
+            if extraction.relation == "uses" and not _has_query_overlap(item, source_claim_text):
                 rejected_count += 1
                 continue
-            if extraction.relation == "uses" and not _text_matches_topic_anchor_terms(claim_text, self.topic_anchor_terms):
+            if extraction.relation == "uses" and not _text_matches_topic_anchor_terms(source_claim_text, self.topic_anchor_terms):
                 rejected_count += 1
                 continue
             if extraction.relation == "uses" and _subject_overlaps_query(subject_canonical, item):
@@ -2010,11 +2018,15 @@ def _meaningful_tokens(text: str) -> list[str]:
         "현장",
     }
     tokens = []
+    seen: set[str] = set()
     for token in normalize_text(text).split():
         if token in stopwords:
             continue
         if len(token) < 3 and not _contains_hangul(token):
             continue
+        if token in seen:
+            continue
+        seen.add(token)
         tokens.append(token)
     return tokens[:8]
 
