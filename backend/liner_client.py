@@ -13,10 +13,17 @@ from events import emit_event
 class LinerClient:
     """Async client that exposes Liner JSON and SSE APIs to the pipeline."""
 
-    def __init__(self, base_url: str | None = None, api_key: str | None = None, timeout: float = 8.0):
+    def __init__(
+        self,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        timeout: float = 8.0,
+        disable_timeouts: bool = False,
+    ):
         self.base_url = (base_url or os.environ.get("LINER_API_BASE_URL", "https://platform.liner.com")).rstrip("/")
         self.api_key = api_key or os.environ.get("LINER_API_KEY", "")
         self.timeout = timeout
+        self.disable_timeouts = disable_timeouts
         self.search_agent_timeout = float(os.environ.get("SEARCH_AGENT_TIMEOUT_S", "4"))
         self.visualization_timeout = float(os.environ.get("VISUALIZATION_TIMEOUT_S", "4"))
 
@@ -82,7 +89,7 @@ class LinerClient:
             body=body,
             stage=stage,
             name="search_agent",
-            timeout_s=timeout_s if timeout_s is not None else self.search_agent_timeout,
+            timeout_s=None if self.disable_timeouts else (timeout_s if timeout_s is not None else self.search_agent_timeout),
         )
 
     async def deep_research(
@@ -90,7 +97,7 @@ class LinerClient:
         messages: list[dict[str, str]],
         *,
         lang: str = "ko",
-        timeout_s: float = 5,
+        timeout_s: float | None = 5,
         request_id: str | None = None,
         stage: str = "conditional_deep_research",
     ) -> dict[str, Any]:
@@ -163,15 +170,16 @@ class LinerClient:
         }
         body = {key: value for key, value in body.items() if value is not None}
         url = f"{self.base_url}{path}"
+        effective_timeout = None if self.disable_timeouts else (timeout_s if timeout_s is not None else self.timeout)
         call_event = emit_event(
             "tool_call",
-            {"name": "search", "mode": mode, "method": "POST", "url": url, "body": body, "timeout_s": timeout_s or self.timeout},
+            {"name": "search", "mode": mode, "method": "POST", "url": url, "body": body, "timeout_s": effective_timeout},
             stage=stage,
             source="liner",
         )
 
         try:
-            async with httpx.AsyncClient(timeout=timeout_s or self.timeout) as client:
+            async with httpx.AsyncClient(timeout=effective_timeout) as client:
                 response = await client.post(
                     url,
                     headers={"x-api-key": self.api_key, "Content-Type": "application/json"},
@@ -188,7 +196,7 @@ class LinerClient:
                     "call_id": call_event["id"],
                     "reason": "budget_timeout",
                     "timeout_kind": "budget",
-                    "timeout_s": timeout_s or self.timeout,
+                    "timeout_s": effective_timeout,
                 },
                 stage=stage,
                 source="liner",
@@ -224,7 +232,7 @@ class LinerClient:
         body: dict[str, Any],
         stage: str,
         name: str,
-        timeout_s: float,
+        timeout_s: float | None,
         accept_sse: bool = False,
     ) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
@@ -258,7 +266,10 @@ class LinerClient:
                     response.raise_for_status()
                     # asyncio.timeout() requires Python 3.11+; wait_for() works on 3.10 too,
                     # which is what ships on some team members' machines.
-                    await asyncio.wait_for(_consume(response), timeout=timeout_s)
+                    if timeout_s is None:
+                        await _consume(response)
+                    else:
+                        await asyncio.wait_for(_consume(response), timeout=timeout_s)
         except (asyncio.TimeoutError, TimeoutError):
             emit_event(
                 "note",

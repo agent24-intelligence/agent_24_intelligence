@@ -48,9 +48,9 @@ class ResearchPipeline:
         deadline: AnalysisDeadline | None = None,
         runtime: RuntimeConfig | None = None,
     ):
-        self.liner = liner or LinerClient()
-        self.agents = agents or ResearchAgents()
         self.runtime = runtime or RuntimeConfig()
+        self.liner = liner or LinerClient(disable_timeouts=self.runtime.disable_timeouts)
+        self.agents = agents or ResearchAgents()
         self.deadline = deadline
         self.last_partial_result: dict[str, Any] | None = None
 
@@ -325,14 +325,18 @@ class ResearchPipeline:
             source="system",
         )
         generated = []
+        # One focused Scholar query is enough for the live demo. Running all
+        # three scope suggestions concurrently caused Liner 429 responses and
+        # pulled broad, irrelevant results into the extraction prompt.
+        selected_topics = scope.selected_topics[:1] or [topic]
         tasks = [
             asyncio.create_task(
                 self.agents.scholar_query(selected_topic, scope, timeout_s=self._stage_timeout("query_generation"))
             )
-            for selected_topic in scope.selected_topics[:3]
+            for selected_topic in selected_topics
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        for selected_topic, result in zip(scope.selected_topics[:3], results):
+        for selected_topic, result in zip(selected_topics, results):
             if isinstance(result, AgentBudgetTimeout):
                 emit_event("note", {"text": f"'{selected_topic}' 쿼리 생성이 늦어 원문 기술명을 검색어로 사용합니다."}, stage="scholar_scout", source="system")
                 generated.append({"query": selected_topic, "rationale": "쿼리 생성 시간 예산 초과로 원문 사용"})
@@ -600,7 +604,9 @@ class ResearchPipeline:
         )
         return links
 
-    def _stage_timeout(self, stage: str, *, reserve_s: float | None = None) -> float:
+    def _stage_timeout(self, stage: str, *, reserve_s: float | None = None) -> float | None:
+        if self.runtime.disable_timeouts:
+            return None
         configured = {
             "scope": self.runtime.scope_timeout_s,
             "query_generation": self.runtime.query_generation_timeout_s,
@@ -815,18 +821,16 @@ class ResearchPipeline:
         }
 
     async def _run_gap_narrative(self, analysis: dict[str, Any], research_clusters: list[ResearchCluster], adoption_clusters: list[AdoptionCluster]) -> dict[str, Any]:
-        try:
-            result = await self.agents.gap_narrative(
-                {"analysis": analysis, "research_clusters": [item.model_dump() for item in research_clusters], "adoption_clusters": [item.model_dump() for item in adoption_clusters]},
-                timeout_s=self._stage_timeout("finalization", reserve_s=0),
-            )
-            return result.model_dump()
-        except AgentBudgetTimeout:
-            emit_event("note", {"text": "최종 설명 생성 시간 예산이 끝나 코드로 계산한 설명을 사용합니다."}, stage="finalization", source="system")
-            return _fallback_narrative(analysis)
-        except Exception as exc:
-            emit_event("error", {"name": "gap_narrator", "message": str(exc)}, stage="finalization", source="openai")
-            return _fallback_narrative(analysis)
+        # 점수와 label은 이미 결정론적으로 계산됐다. 외부 모델을 최종 응답의
+        # critical path에 두면 모델 지연 때문에 결과 자체가 늦어지므로, 설명도
+        # 같은 계산 결과에서 즉시 조합한다.
+        emit_event(
+            "note",
+            {"text": "최종 설명은 계산된 점수·연결·갭 유형을 바탕으로 정리합니다."},
+            stage="finalization",
+            source="system",
+        )
+        return _deterministic_narrative(analysis)
 
     async def _run_gap_map(self, topic: str, analysis: dict[str, Any], *, max_results: int) -> dict[str, Any]:
         emit_event("note", {"text": "최종 점수와 연구·산업 연결 구조를 Gap Map 시각화로 전달합니다."}, stage="gap_map", source="system")
@@ -1084,12 +1088,52 @@ def _top_analysis(analyses: list[dict[str, Any]]) -> dict[str, Any]:
     return max(analyses, key=lambda item: item["scores"].get("gap_priority", 0))
 
 
-def _fallback_narrative(analysis: dict[str, Any]) -> dict[str, Any]:
+def _deterministic_narrative(analysis: dict[str, Any]) -> dict[str, Any]:
     scores = analysis.get("scores", {})
     label = analysis.get("label", "insufficient_evidence")
+    cluster = analysis.get("research_cluster", {})
+    technology = cluster.get("technology") or "해당 기술"
+    use_case = cluster.get("use_case") or "해당 사용 사례"
+    links = analysis.get("links", [])
+    direct_count = sum(link.get("link_type") == "direct" for link in links)
+    partial_count = sum(link.get("link_type") == "partial" for link in links)
+    blocked_count = sum(link.get("link_type") == "blocked" for link in links)
+
+    connected_points = []
+    if direct_count:
+        connected_points.append(f"{technology}의 {use_case} 적용과 산업 도입 사이에서 직접 연결 {direct_count}건을 확인했습니다.")
+    if partial_count:
+        connected_points.append(f"연구와 산업 사례 사이의 부분 연결 {partial_count}건을 확인했습니다.")
+
+    gap_messages = {
+        "no_adoption_link": "현재 검색 범위에서 연구 적용과 직접 연결되는 산업 도입을 확인하지 못했습니다.",
+        "possible_no_adoption_link": "산업 도입 연결을 판단할 구조화된 근거가 부족합니다.",
+        "stage_gap": "산업 사례가 파일럿 또는 제한 운영 단계에 머물러 정식 운영까지 이어진 근거가 부족합니다.",
+        "context_gap": "연구와 산업 사례의 배포 환경 또는 사용 맥락이 일치하지 않습니다.",
+        "technology_substitution": "산업에서는 같은 사용 사례를 다른 기술로 해결하는 정황이 확인됩니다.",
+        "barrier_gap": "도입 중단·거절·금지와 관련된 장벽 근거가 확인됩니다.",
+        "outcome_gap": "운영은 확인됐지만 연구에서 기대한 결과와 실제 결과가 일치하지 않습니다.",
+    }
+    gap_points = [gap_messages[gap_type] for gap_type in analysis.get("gap_types", []) if gap_type in gap_messages]
+    if blocked_count:
+        gap_points.append(f"도입 중단 또는 거절 연결 {blocked_count}건을 확인했습니다.")
+
+    potential_points = []
+    for candidate in analysis.get("candidate_connections", [])[:2]:
+        missing = candidate.get("missing_dimensions") or candidate.get("required_validation") or []
+        if missing:
+            potential_points.append(f"추가 확인이 필요한 차원: {', '.join(missing)}.")
+    potential_points = list(dict.fromkeys(potential_points))
+
     return {
-        "rationale": f"연구 근거 성숙도 {scores.get('evidence_maturity', 0)}, 현실 도입 증거 {scores.get('adoption_evidence', 0)}, 검색 커버리지 {scores.get('coverage_confidence', 0)}로 {label}을 판정했습니다.",
-        "connected_points": [],
-        "gap_points": ["현재 검색 범위에서 직접 연결되는 산업 도입을 확인하지 못했습니다."] if "no_adoption_link" in analysis.get("gap_types", []) else [],
-        "potential_points": [],
+        "rationale": (
+            f"연구 근거 성숙도 {scores.get('evidence_maturity', 0)}/100, "
+            f"산업 도입 증거 {scores.get('adoption_evidence', 0)}/100, "
+            f"검색 커버리지 {scores.get('coverage_confidence', 0)}/100를 기준으로 "
+            f"{label}을 판정했습니다. 직접 연결 {direct_count}건, 부분 연결 {partial_count}건, "
+            f"중단·거절 연결 {blocked_count}건입니다."
+        ),
+        "connected_points": connected_points[:5],
+        "gap_points": list(dict.fromkeys(gap_points))[:5],
+        "potential_points": potential_points[:5],
     }

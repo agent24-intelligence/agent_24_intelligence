@@ -19,17 +19,25 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class RuntimeConfig:
+    disable_timeouts: bool = field(default_factory=lambda: _env_bool("DISABLE_TIMEOUTS"))
     total_timeout_s: float = field(default_factory=lambda: _env_float("ANALYZE_TIMEOUT_S", _env_float("PIPELINE_TIMEOUT_S", 55)))
-    preflight_timeout_s: float = field(default_factory=lambda: _env_float("PREFLIGHT_TIMEOUT_S", 3))
+    preflight_timeout_s: float = field(default_factory=lambda: _env_float("PREFLIGHT_TIMEOUT_S", 4))
     scope_timeout_s: float = field(default_factory=lambda: _env_float("SCOPE_TIMEOUT_S", 3))
     query_generation_timeout_s: float = field(default_factory=lambda: _env_float("QUERY_GENERATION_TIMEOUT_S", 2))
     scholar_search_timeout_s: float = field(default_factory=lambda: _env_float("SCHOLAR_SEARCH_TIMEOUT_S", 5))
     academic_vocab_timeout_s: float = field(default_factory=lambda: _env_float("ACADEMIC_VOCAB_TIMEOUT_S", 5))
     adoption_search_timeout_s: float = field(default_factory=lambda: _env_float("ADOPTION_SEARCH_TIMEOUT_S", 5))
     adoption_extraction_timeout_s: float = field(default_factory=lambda: _env_float("ADOPTION_EXTRACTION_TIMEOUT_S", 4))
-    academic_extraction_timeout_s: float = field(default_factory=lambda: _env_float("ACADEMIC_EXTRACTION_TIMEOUT_S", 5))
+    academic_extraction_timeout_s: float = field(default_factory=lambda: _env_float("ACADEMIC_EXTRACTION_TIMEOUT_S", 10))
     linkage_timeout_s: float = field(default_factory=lambda: _env_float("LINKAGE_TIMEOUT_S", 4))
     adversarial_timeout_s: float = field(default_factory=lambda: _env_float("ADVERSARIAL_TIMEOUT_S", 4))
     counter_relink_timeout_s: float = field(default_factory=lambda: _env_float("COUNTER_RELINK_TIMEOUT_S", 4))
@@ -52,4 +60,3 @@ class AnalysisDeadline:
     def timeout(self, configured_s: float, *, reserve_s: float = 0.0) -> float:
         available = self.remaining() - max(0.0, reserve_s)
         return max(0.05, min(configured_s, available))
-
