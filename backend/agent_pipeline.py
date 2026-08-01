@@ -56,6 +56,7 @@ class ResearchPipeline:
         self.deadline = deadline
         self.last_partial_result: dict[str, Any] | None = None
         self.topic_anchor_terms: tuple[str, ...] = ()
+        self.topic_anchor_filter_counts: dict[str, int] = {}
 
     async def run(
         self,
@@ -68,6 +69,7 @@ class ResearchPipeline:
         self.deadline = self.deadline or AnalysisDeadline(self.runtime.total_timeout_s)
         self.last_partial_result = None
         self.topic_anchor_terms = _topic_anchor_terms(topic)
+        self.topic_anchor_filter_counts = {"scholar": 0, "adoption": 0, "counter": 0, "deep_research": 0}
         max_results = min(max_results, self.runtime.max_search_results)
 
         scope = await self._calibrate_scope(topic)
@@ -77,6 +79,7 @@ class ResearchPipeline:
         scholar_queries, query_generations = await self._build_scholar_queries(topic, scope, scholar_query)
         scholar = await self._run_scholar_scout(scholar_queries, max_results=max_results)
         scholar, scholar_filtered = _filter_search_result_by_topic_anchor_terms(scholar, self.topic_anchor_terms)
+        self.topic_anchor_filter_counts["scholar"] += scholar_filtered
         if scholar_filtered:
             emit_event(
                 "note",
@@ -118,6 +121,7 @@ class ResearchPipeline:
         query_specs = self._build_adoption_query_specs(topic, vocabulary, adoption_queries)
         adoption = await self._run_adoption_scout(query_specs, max_results=max_results)
         adoption, adoption_filtered = _filter_search_responses_by_topic_anchor_terms(adoption, self.topic_anchor_terms)
+        self.topic_anchor_filter_counts["adoption"] += adoption_filtered
         if adoption_filtered:
             emit_event(
                 "note",
@@ -194,6 +198,7 @@ class ResearchPipeline:
             counter_result = await self._run_adversarial_verifier(counter_query)
             counter_items = _extract_counter_items(counter_result)
             counter_items, counter_filtered = _filter_items_by_topic_anchor_terms(counter_items, self.topic_anchor_terms)
+            self.topic_anchor_filter_counts["counter"] += counter_filtered
             if counter_filtered:
                 emit_event(
                     "note",
@@ -272,6 +277,7 @@ class ResearchPipeline:
         deep_research = await self._run_conditional_deep_research(topic, top_candidate, counter_evidence)
         deep_items = deep_research.pop("adoption_items", [])
         deep_items, deep_filtered = _filter_items_by_topic_anchor_terms(deep_items, self.topic_anchor_terms)
+        self.topic_anchor_filter_counts["deep_research"] += deep_filtered
         if deep_filtered:
             emit_event(
                 "note",
@@ -1214,6 +1220,10 @@ class ResearchPipeline:
 
     def _insufficient_result(self, *, topic: str, scope: Any, scholar: dict[str, Any], scholar_queries: list[str], query_generations: list[dict[str, Any]], academic_records: list[Any]) -> dict[str, Any]:
         reason = "학술 검색 결과에서 점수 계산에 필요한 적용 주장을 구조화하지 못했습니다."
+        anchor_filter_total = sum(self.topic_anchor_filter_counts.values())
+        if self.topic_anchor_terms and anchor_filter_total:
+            anchors = ", ".join(self.topic_anchor_terms)
+            reason = f"검색 결과 {anchor_filter_total}건이 있었지만 원문 핵심 약어({anchors})를 모두 포함하지 않아 점수 계산 근거에서 제외했습니다."
         emit_event("note", {"text": reason}, stage="finalization", source="system")
         result = {
             "topic": topic,
@@ -1242,6 +1252,7 @@ class ResearchPipeline:
             "adoption": [],
             "scholar_query_generation": query_generations,
             "vocabulary": {"terms": [], "industry_terms": [], "query_families": {}, "mapping_confidence": 0, "rationale": ""},
+            "topic_anchor": {"terms": list(self.topic_anchor_terms), "filtered_counts": dict(self.topic_anchor_filter_counts)},
             "gap_candidate": None,
         }
         emit_event("finish", {"topic": topic, "label": result["label"], "scores": result["scores"]}, stage="finalization", source="system")
@@ -1279,6 +1290,7 @@ class ResearchPipeline:
             "adoption": adoption,
             "scholar_query_generation": query_generations,
             "vocabulary": {**vocabulary.model_dump(), "industry_terms": vocabulary.terms},
+            "topic_anchor": {"terms": list(self.topic_anchor_terms), "filtered_counts": dict(self.topic_anchor_filter_counts)},
             "gap_candidate": top_candidate,
         }
 

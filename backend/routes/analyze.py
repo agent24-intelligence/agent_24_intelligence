@@ -337,6 +337,7 @@ def _final_synthesis_payload(result: dict[str, Any]) -> dict[str, Any]:
         "links": candidate.get("links", [])[:5],
         "score_breakdown": candidate.get("score_breakdown", {}),
         "vocabulary": result.get("vocabulary", {}),
+        "topic_anchor": result.get("topic_anchor", {}),
         "queries": result.get("queries", {}),
         "deep_research": _compact_deep_research(result.get("deep_research", {})),
         "academic_evidence": [_compact_record(record) for record in result.get("academic_evidence", [])[:6]],
