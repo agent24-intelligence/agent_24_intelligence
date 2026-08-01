@@ -378,6 +378,7 @@ export default function UserView() {
                   // overflow가 걸린 요소를 전부 찾아서 같이 풀어준다.
                   const unclamp = () => {
                     doc.documentElement.style.setProperty('height', 'auto', 'important')
+                    doc.documentElement.style.setProperty('min-height', '0', 'important')
                     doc.documentElement.style.setProperty('overflow', 'visible', 'important')
                     if (doc.body) {
                       doc.body.style.setProperty('height', 'auto', 'important')
@@ -387,18 +388,40 @@ export default function UserView() {
                     doc.querySelectorAll('*').forEach((el) => {
                       const cs = doc.defaultView?.getComputedStyle(el)
                       if (!cs) return
-                      if (['auto', 'scroll'].includes(cs.overflow) || ['auto', 'scroll'].includes(cs.overflowY)) {
+                      const hasScroll = [cs.overflow, cs.overflowX, cs.overflowY].some((v) => ['auto', 'scroll'].includes(v))
+                      const isLinerWrapper = el.id === 'vis-container'
+                      if (hasScroll || isLinerWrapper) {
                         el.style.setProperty('overflow', 'visible', 'important')
+                        el.style.setProperty('overflow-x', 'visible', 'important')
+                        el.style.setProperty('overflow-y', 'visible', 'important')
                         el.style.setProperty('height', 'auto', 'important')
+                        el.style.setProperty('min-height', '0', 'important')
                         el.style.setProperty('max-height', 'none', 'important')
                       }
                     })
                   }
 
+                  const measureHeight = () => {
+                    const rootTop = doc.documentElement.getBoundingClientRect().top
+                    let visualBottom = 0
+                    doc.querySelectorAll('body *').forEach((el) => {
+                      const rect = el.getBoundingClientRect()
+                      if (rect.width > 0 || rect.height > 0) {
+                        visualBottom = Math.max(visualBottom, rect.bottom - rootTop)
+                      }
+                    })
+
+                    return Math.ceil(Math.max(
+                      doc.documentElement.scrollHeight,
+                      doc.body?.scrollHeight || 0,
+                      visualBottom,
+                      400,
+                    ))
+                  }
+
                   const resize = () => {
                     unclamp()
-                    const h = Math.max(doc.documentElement.scrollHeight, doc.body?.scrollHeight || 0)
-                    iframe.style.height = `${h}px`
+                    iframe.style.height = `${measureHeight()}px`
                   }
                   resize()
 
@@ -407,11 +430,12 @@ export default function UserView() {
                   if ('ResizeObserver' in window && doc.body) {
                     const ro = new ResizeObserver(resize)
                     ro.observe(doc.body)
+                    const visContainer = doc.getElementById('vis-container')
+                    if (visContainer) ro.observe(visContainer)
                   } else {
-                    setTimeout(resize, 200)
-                    setTimeout(resize, 600)
-                    setTimeout(resize, 1200)
+                    resize()
                   }
+                  ;[200, 600, 1200, 2200].forEach((delay) => setTimeout(resize, delay))
                 }}
               />
             </>
