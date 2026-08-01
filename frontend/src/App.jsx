@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import RawStream from './components/RawStream'
 import ApiTester from './components/ApiTester'
+import GapMap from './components/GapMap'
 import './App.css'
 
 // 데모 세컨드 화면에서는 ?clean=1 로 열면 탭/테스트 패널 없이 스트림만 나온다.
@@ -28,12 +29,19 @@ export default function App() {
           <button className={tab === 'test' ? 'active' : ''} onClick={() => setTab('test')}>
             API 테스트
           </button>
+          <button className={tab === 'gapmap' ? 'active' : ''} onClick={() => setTab('gapmap')}>
+            Gap Map
+          </button>
         </nav>
         <a className="clean-link" href="?clean=1" target="_blank" rel="noreferrer">
           세컨드 화면용 링크 (탭 없이)
         </a>
       </header>
-      <main>{tab === 'stream' ? <RawStream /> : <ApiTester />}</main>
+      <main>
+        {tab === 'stream' && <RawStream />}
+        {tab === 'test' && <ApiTester />}
+        {tab === 'gapmap' && <GapMap />}
+      </main>
     </div>
   )
 }

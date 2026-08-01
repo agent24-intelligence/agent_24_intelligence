@@ -56,8 +56,22 @@ async def _run_mock_pipeline():
     await step(0.4, "note", {"text": "25초 타임아웃 도달 → 지금까지의 Search Agent 근거로 잠정 결론, 확신도 낮음으로 표시"}, stage="conditional_deep_research", source="system")
     await step(0.1, "error", {"name": "deep_research", "reason": "timeout", "elapsed_s": 25}, stage="conditional_deep_research", source="liner")
 
-    await step(0.3, "tool_call", {"name": "visualization", "params": {"theme": "comparison"}}, stage="gap_map", source="liner")
-    await step(1.0, "tool_result", {"name": "visualization", "theme": "comparison", "artifact": "<div>gap map html (생략)</div>"}, stage="gap_map", source="liner")
+    # Liner Visualization API 실제 이벤트 모양: start → start-step → data-atlas → finish-step → finish
+    await step(0.3, "tool_call", {"name": "visualization", "params": {"query": "적용 갭 리포트 시각화", "theme": "comparison"}}, stage="gap_map", source="liner")
+    _MOCK_GAP_MAP_HTML = (
+        "<!DOCTYPE html><html><body style='font-family:sans-serif;padding:24px'>"
+        "<h2>적용 갭 리포트 (모의)</h2>"
+        "<p>연구 근거 성숙도 —— 82</p><p>공개 도입 증거 —— 24</p><p>검색 커버리지 —— 81</p>"
+        "<p><b>적용 갭 신뢰도: HIGH (확신도 낮음 표시 포함)</b></p>"
+        "</body></html>"
+    )
+    await step(
+        1.0,
+        "data-atlas",
+        {"data": {"atlasArtifact": {"html": _MOCK_GAP_MAP_HTML, "theme": "comparison", "description": "모의 데이터 기반 적용 갭 리포트"}}},
+        stage="gap_map",
+        source="liner",
+    )
 
     await step(0.2, "finish", {"summary": "적용 갭 신뢰도: HIGH (확신도 낮음 표시 포함)"}, stage="gap_map", source="system")
 
