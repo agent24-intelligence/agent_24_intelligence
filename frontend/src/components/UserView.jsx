@@ -35,6 +35,18 @@ const LABEL_TONE = {
   over_adopted: 'label-alert',
 }
 
+async function readJsonOrText(res) {
+  const text = await res.text()
+  if (!text.trim()) {
+    return { error: 'empty_response', status: res.status }
+  }
+  try {
+    return JSON.parse(text)
+  } catch (err) {
+    return { error: `응답 JSON 파싱 실패: ${err.message}`, status: res.status, body: text }
+  }
+}
+
 export default function UserView() {
   const [topic, setTopic] = useState('')
   const [status, setStatus] = useState('idle') // idle | running | done | error
@@ -70,8 +82,12 @@ export default function UserView() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ topic, max_results: 10 }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.detail ? JSON.stringify(data.detail) : `요청 실패 (${res.status})`)
+      const data = await readJsonOrText(res)
+      if (!res.ok) {
+        const detail = data?.detail ?? data?.message ?? data?.error
+        throw new Error(detail ? (typeof detail === 'string' ? detail : JSON.stringify(detail)) : `요청 실패 (${res.status})`)
+      }
+      if (data?.error) throw new Error(data.error)
       setResult(data)
       setStatus('done')
     } catch (err) {
