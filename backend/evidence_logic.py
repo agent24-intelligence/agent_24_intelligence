@@ -413,10 +413,10 @@ def classify_final_label(
 ) -> str:
     if field_not_confirmed:
         return "unconfirmed_field"
-    if coverage_confidence < LABEL_THRESHOLDS["min_coverage"] or evidence_maturity < LABEL_THRESHOLDS["min_evidence"]:
-        return "insufficient_evidence"
     if adoption_evidence >= LABEL_THRESHOLDS["no_gap_adoption"] or direct_production_org_count >= LABEL_THRESHOLDS["no_gap_direct_production_orgs"]:
         return "no_gap"
+    if coverage_confidence < LABEL_THRESHOLDS["min_coverage"] or evidence_maturity < LABEL_THRESHOLDS["min_evidence"]:
+        return "insufficient_evidence"
     if (
         evidence_maturity >= LABEL_THRESHOLDS["gap_evidence"]
         and adoption_evidence <= LABEL_THRESHOLDS["gap_max_adoption"]
