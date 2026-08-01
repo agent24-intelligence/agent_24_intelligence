@@ -10,6 +10,11 @@ from starlette.responses import JSONResponse
 
 from agent_pipeline import ResearchPipeline, build_deadline_result
 from events import emit_event
+from input_gate import (
+    contains_hangul as _contains_hangul,
+    looks_too_broad_for_demo as _looks_too_broad_for_demo,
+    normalize_topic_for_gate as _normalize_topic_for_gate,
+)
 from openai_agents import AgentBudgetTimeout, InputPreflightResult, ResearchAgents
 from runtime_config import AnalysisDeadline, RuntimeConfig
 
@@ -44,12 +49,6 @@ class PreflightFailure(RuntimeError):
     """The cheap input gate failed, so the expensive pipeline must not run."""
 
 
-def _normalize_topic_for_gate(value: str) -> str:
-    normalized = value.casefold().strip()
-    normalized = normalized.replace("(", " ").replace(")", " ").replace("-", " ")
-    return " ".join(normalized.split())
-
-
 def _calibrate_broad_resolved_topic(result: InputPreflightResult) -> InputPreflightResult:
     """Catch broad topics even when the model first corrected a typo."""
     if result.status == "rejected":
@@ -63,24 +62,6 @@ def _calibrate_broad_resolved_topic(result: InputPreflightResult) -> InputPrefli
         result.recommendations = result.recommendations or _broad_topic_recommendations(topic_for_message)
         return result
     return result
-
-
-def _looks_too_broad_for_demo(topic: str) -> bool:
-    normalized = _normalize_topic_for_gate(topic)
-    tokens = normalized.split()
-    # Hard-gate only obvious short single-token inputs. Multi-token terms often
-    # encode technique + target/use case, so they should be judged by the
-    # preflight model instead of an alias list.
-    if len(tokens) != 1:
-        return False
-    if _contains_hangul(normalized):
-        compact_len = len(normalized.replace(" ", ""))
-        return compact_len <= 6
-    return len(tokens[0]) <= 8
-
-
-def _contains_hangul(value: str) -> bool:
-    return any("\uac00" <= char <= "\ud7a3" for char in value)
 
 
 def _broad_topic_recommendations(topic: str) -> list[str]:
