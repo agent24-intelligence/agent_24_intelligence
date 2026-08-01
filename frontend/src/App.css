@@ -343,6 +343,18 @@
   margin: 0 0 20px;
 }
 
+.user-view-partial-note {
+  width: 100%;
+  margin: 0 0 18px;
+  padding: 10px 12px;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border-left: 3px solid var(--accent);
+  font-size: 13px;
+  line-height: 1.55;
+  text-align: left;
+}
+
 .corrected-note-term {
   color: var(--text);
   font-style: italic;

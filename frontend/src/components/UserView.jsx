@@ -517,6 +517,12 @@ export default function UserView() {
             </p>
           )}
 
+          {result.analysis_status === 'partial' && (
+            <p className="user-view-partial-note">
+              시간 예산 안에서 확보된 근거로 잠정 판정했습니다. 아래 점수와 근거는 추가 검색 전 상태입니다.
+            </p>
+          )}
+
           <div className={`user-view-label ${LABEL_TONE[result.label] || 'label-neutral'}`}>
             {LABEL_TEXT[result.label] || result.label}
           </div>
