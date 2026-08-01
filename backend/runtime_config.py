@@ -46,7 +46,7 @@ class RuntimeConfig:
     visualization_timeout_s: float = field(default_factory=lambda: _env_float("VISUALIZATION_TIMEOUT_S", 4))
     final_reserve_s: float = field(default_factory=lambda: _env_float("FINAL_RESERVE_S", 7))
     max_search_results: int = field(default_factory=lambda: max(1, int(os.environ.get("MAX_SEARCH_RESULTS", "5"))))
-    max_adoption_queries: int = field(default_factory=lambda: max(1, int(os.environ.get("MAX_ADOPTION_QUERIES", "3"))))
+    max_adoption_queries: int = field(default_factory=lambda: max(1, int(os.environ.get("MAX_ADOPTION_QUERIES", "5"))))
     max_extraction_items: int = field(default_factory=lambda: max(1, int(os.environ.get("MAX_EXTRACTION_ITEMS", "24"))))
 
 

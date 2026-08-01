@@ -35,6 +35,7 @@ class AnalyzeRequest(TopicRequest):
     adoption_queries: list[str] | None = None
     max_results: int = Field(default=10, ge=1, le=20)
     fast_mode: bool = False
+    accepted_recommendation: bool = False
 
 
 class PreflightFailure(RuntimeError):
@@ -186,11 +187,27 @@ async def analyze(request: AnalyzeRequest):
     pipeline = ResearchPipeline(deadline=deadline, runtime=request_runtime)
     preflight: InputPreflightResult | None = None
     try:
-        # _run_preflight already enforces and recovers from its own stage budget.
-        # Wrapping it in another wait_for with the same timeout creates a race:
-        # the outer timeout can fire first and be misreported as a full-pipeline
-        # deadline instead of falling back to the original topic.
-        preflight = await _run_preflight(request.topic, request_runtime)
+        if request.accepted_recommendation:
+            emit_event(
+                "note",
+                {"text": "추천 검색어 선택: 추가 구체화 검사 없이 바로 분석을 시작합니다.", "topic": request.topic},
+                stage="input_preflight",
+                source="system",
+            )
+            preflight = InputPreflightResult(
+                status="ready",
+                reason_code="accepted_recommendation",
+                original_topic=request.topic,
+                resolved_topic=request.topic,
+                message="추천 검색어를 선택해 바로 분석합니다.",
+                recommendations=[],
+            )
+        else:
+            # _run_preflight already enforces and recovers from its own stage budget.
+            # Wrapping it in another wait_for with the same timeout creates a race:
+            # the outer timeout can fire first and be misreported as a full-pipeline
+            # deadline instead of falling back to the original topic.
+            preflight = await _run_preflight(request.topic, request_runtime)
         if preflight.status in {"rejected", "needs_calibration"}:
             return _preflight_response(preflight)
 

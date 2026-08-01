@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
+from urllib.parse import urlsplit
 
 from events import emit_event
 from evidence_logic import (
@@ -103,7 +105,7 @@ class ResearchPipeline:
             )
 
         vocabulary = await vocabulary_task
-        query_specs = self._build_adoption_query_specs(vocabulary, adoption_queries)
+        query_specs = self._build_adoption_query_specs(topic, vocabulary, adoption_queries)
         adoption = await self._run_adoption_scout(query_specs, max_results=max_results)
         adoption_items = _tag_items(_flatten_results(adoption), "adoption")
         adoption_records, adoption_extraction_meta = await self._extract_adoption_records(adoption_items)
@@ -132,7 +134,17 @@ class ResearchPipeline:
             total_relevant_results=academic_extraction_meta["total_relevant_results"] + adoption_extraction_meta["total_relevant_results"],
             adversarial=None,
         )
-        analyses = self._evaluate_all(research_clusters, adoption_clusters, links, coverage, scope.status == "unconfirmed")
+        evidence_floor = _topic_evidence_floor(academic_records, scholar_items)
+        adoption_floor = _topic_adoption_floor(adoption_records)
+        analyses = self._evaluate_all(
+            research_clusters,
+            adoption_clusters,
+            links,
+            coverage,
+            scope.status == "unconfirmed",
+            evidence_floor=evidence_floor,
+            adoption_floor=adoption_floor,
+        )
         top_candidate = _top_analysis(analyses)
         self._remember_partial(
             topic=topic,
@@ -198,7 +210,17 @@ class ResearchPipeline:
                 "result_count": len({item.get("url") or item.get("title") for item in counter_items if item.get("url") or item.get("title")}),
             },
         )
-        analyses = self._evaluate_all(research_clusters, adoption_clusters, links, coverage, False)
+        evidence_floor = _topic_evidence_floor(academic_records, scholar_items)
+        adoption_floor = _topic_adoption_floor(adoption_records)
+        analyses = self._evaluate_all(
+            research_clusters,
+            adoption_clusters,
+            links,
+            coverage,
+            False,
+            evidence_floor=evidence_floor,
+            adoption_floor=adoption_floor,
+        )
         top_candidate = _top_analysis(analyses)
         self._remember_partial(
             topic=topic,
@@ -251,7 +273,17 @@ class ResearchPipeline:
                     "result_count": len({item.get("url") or item.get("title") for item in [*counter_items, *deep_items] if item.get("url") or item.get("title")}),
                 },
             )
-            analyses = self._evaluate_all(research_clusters, adoption_clusters, links, coverage, False)
+            evidence_floor = _topic_evidence_floor(academic_records, scholar_items)
+            adoption_floor = _topic_adoption_floor(adoption_records)
+            analyses = self._evaluate_all(
+                research_clusters,
+                adoption_clusters,
+                links,
+                coverage,
+                False,
+                evidence_floor=evidence_floor,
+                adoption_floor=adoption_floor,
+            )
             top_candidate = next((item for item in analyses if item["research_cluster_id"] == deep_target_id), _top_analysis(analyses))
         deep_review = deep_research.get("review", {})
         if deep_review.get("explicit_outcome_mismatch"):
@@ -403,7 +435,7 @@ class ResearchPipeline:
                 rationale="용어 변환 시간 예산 초과로 입력 주제를 사용했습니다.",
             )
 
-    def _build_adoption_query_specs(self, vocabulary: Any, overrides: list[str] | None) -> list[tuple[str, str]]:
+    def _build_adoption_query_specs(self, topic: str, vocabulary: Any, overrides: list[str] | None) -> list[tuple[str, str]]:
         if overrides:
             return [(query, "manual") for query in overrides[: self.runtime.max_adoption_queries]]
         families = vocabulary.query_families.model_dump()
@@ -416,6 +448,13 @@ class ResearchPipeline:
         korean_input = _contains_hangul(" ".join([*technologies, *use_cases, *contexts, *map(str, vocabulary.terms or [])]))
 
         specs: list[tuple[str, str]] = []
+        topic = str(topic or "").strip()
+        if topic:
+            if _contains_hangul(topic):
+                specs.append((f"{topic} 산업 적용 사례", "topic"))
+                specs.append((f"{topic} 상용 서비스", "topic"))
+            specs.append((f"{topic} production deployment", "topic"))
+            specs.append((f"{topic} inference serving production", "topic"))
         if korean_input and technologies and use_cases:
             specs.append((f"{technologies[0]} {use_cases[0]} 산업 적용 사례", "technology+use_case"))
             specs.append((f"{technologies[0]} {use_cases[0]} 상용 서비스", "technology+use_case"))
@@ -427,6 +466,9 @@ class ResearchPipeline:
             specs.append((f"{technologies[0]} {use_cases[1]} production deployment", "technology+use_case"))
         if technologies and contexts:
             specs.append((f"{technologies[0]} {contexts[0]} engineering blog production", "technology+context"))
+        if technologies:
+            specs.append((f"{technologies[0]} inference serving production", "technology"))
+            specs.append((f"{technologies[0]} cloud deployment case study", "technology"))
         for technology in technologies[:2]:
             for use_case in use_cases[:2]:
                 specs.append((f"{technology} {use_case} case study", "technology+use_case"))
@@ -464,7 +506,7 @@ class ResearchPipeline:
             tagged = dict(response)
             tagged["query"] = query
             tagged["query_family"] = family
-            tagged["results"] = [_tag_item(item, family) for item in response.get("results", [])]
+            tagged["results"] = [{**_tag_item(item, family), "query": query} for item in response.get("results", [])]
             return tagged
 
         responses = await asyncio.gather(
@@ -553,29 +595,52 @@ class ResearchPipeline:
         try:
             batch: AdoptionExtractionBatch = await self.agents.adoption_extract(source_items, timeout_s=self._stage_timeout("adoption_extraction"))
         except AgentBudgetTimeout:
-            emit_event("note", {"text": "산업 도입 근거 구조화 시간 예산이 끝나 확인된 기록만으로 잠정 판정합니다."}, stage="adoption_extraction", source="system")
-            return [], {"total_relevant_results": len(items), "structured_record_count": 0, "failed_count": len(items), "timed_out": True}
+            fallback_records = _fallback_adoption_records(source_items, set())
+            if fallback_records:
+                emit_event(
+                    "note",
+                    {"text": f"산업 도입 근거 구조화 시간 예산 초과 → 명시적 운영 신호 {len(fallback_records)}건을 보조 근거로 반영합니다."},
+                    stage="adoption_extraction",
+                    source="system",
+                )
+            else:
+                emit_event("note", {"text": "산업 도입 근거 구조화 시간 예산이 끝나 확인된 기록만으로 잠정 판정합니다."}, stage="adoption_extraction", source="system")
+            return fallback_records, {
+                "total_relevant_results": len(items),
+                "structured_record_count": len(fallback_records),
+                "failed_count": max(0, len(items) - len(fallback_records)),
+                "timed_out": True,
+                "fallback_count": len(fallback_records),
+            }
         except Exception as exc:
+            fallback_records = _fallback_adoption_records(source_items, set())
             emit_event(
                 "note",
-                {"text": "산업 도입 근거 구조화 실패 → 검색 결과 원문과 반증 검색으로 잠정 판정합니다.", "error": str(exc)},
+                {"text": f"산업 도입 근거 구조화 실패 → 명시적 운영 신호 {len(fallback_records)}건을 보조 근거로 반영합니다.", "error": str(exc)},
                 stage="adoption_extraction",
                 source="system",
             )
-            return [], {
+            return fallback_records, {
                 "total_relevant_results": len(items),
-                "structured_record_count": 0,
-                "failed_count": len(items),
+                "structured_record_count": len(fallback_records),
+                "failed_count": max(0, len(items) - len(fallback_records)),
                 "error": str(exc),
+                "fallback_count": len(fallback_records),
             }
         records: list[AdoptionEvidenceRecord] = []
+        rejected_count = 0
         for extraction in batch.records:
             if not extraction.is_relevant or extraction.extraction_confidence < 0.55:
+                rejected_count += 1
                 continue
             item = source_items[extraction.source_index] if extraction.source_index < len(source_items) else None
             technology_canonical = normalize_text(extraction.technology_canonical or extraction.technology_raw) or None
             subject_canonical = normalize_text(extraction.subject_canonical or extraction.subject_raw) or None
             if not item or not extraction.evidence_span or not technology_canonical or not subject_canonical:
+                rejected_count += 1
+                continue
+            if not _has_actionable_adoption_locus(extraction):
+                rejected_count += 1
                 continue
             usage_context = extraction.usage_context if extraction.relation == "uses" else None
             adoption_stage = extraction.adoption_stage if extraction.relation == "uses" and usage_context != "vendor_product_integration" else None
@@ -609,10 +674,21 @@ class ResearchPipeline:
                     explicit_barriers=extraction.explicit_barriers,
                 )
             )
+        fallback_records = _fallback_adoption_records(source_items, {record.source_id for record in records})
+        if fallback_records:
+            emit_event(
+                "note",
+                {"text": f"명시적 운영 신호가 있는 산업 검색 결과 {len(fallback_records)}건을 보조 구조화 근거로 반영합니다."},
+                stage="adoption_extraction",
+                source="system",
+            )
+            records.extend(fallback_records)
         return records, {
             "total_relevant_results": len(items),
             "structured_record_count": len(records),
             "failed_count": max(0, len(items) - len(records)),
+            "rejected_weak_adoption_count": rejected_count,
+            "fallback_count": len(fallback_records),
             "structured_source_count": len(source_items),
         }
 
@@ -783,7 +859,17 @@ class ResearchPipeline:
             adversarial_skipped_with_adoption=bool(adversarial and adversarial.get("skipped_with_adoption")),
         )
 
-    def _evaluate_all(self, research_clusters: list[ResearchCluster], adoption_clusters: list[AdoptionCluster], links: list[ClusterLink], coverage: dict[str, Any], field_not_confirmed: bool) -> list[dict[str, Any]]:
+    def _evaluate_all(
+        self,
+        research_clusters: list[ResearchCluster],
+        adoption_clusters: list[AdoptionCluster],
+        links: list[ClusterLink],
+        coverage: dict[str, Any],
+        field_not_confirmed: bool,
+        *,
+        evidence_floor: int = 0,
+        adoption_floor: int = 0,
+    ) -> list[dict[str, Any]]:
         adoption_by_id = {cluster.cluster_id: cluster for cluster in adoption_clusters}
         by_research: dict[str, list[ClusterLink]] = {}
         for link in links:
@@ -793,10 +879,24 @@ class ResearchPipeline:
             cluster_links = by_research.get(research.cluster_id, [])
             adoption_breakdown = calculate_adoption_evidence(cluster_links, adoption_by_id)
             coverage_breakdown = coverage
-            maturity = research.evidence_maturity or 0
-            adoption_score = adoption_breakdown["total"]
+            raw_maturity = research.evidence_maturity or 0
+            raw_adoption_score = adoption_breakdown["total"]
+            maturity = max(raw_maturity, evidence_floor)
+            adoption_score = max(raw_adoption_score, adoption_floor)
+            if evidence_floor > raw_maturity:
+                research.evidence_maturity = maturity
+            if adoption_floor > raw_adoption_score:
+                adoption_breakdown["signals"]["topic_floor_applied"] = adoption_floor
+                adoption_breakdown["details"]["raw_linked_total"] = raw_adoption_score
+                adoption_breakdown["total"] = adoption_score
             coverage_score = coverage_breakdown["total"]
             gap_types = classify_gap_types(research, cluster_links, adoption_by_id, coverage_score)
+            if adoption_score >= 40:
+                gap_types = [
+                    gap_type
+                    for gap_type in gap_types
+                    if gap_type not in {"no_adoption_link", "possible_no_adoption_link"}
+                ]
             direct_production = int(adoption_breakdown["signals"]["direct_production_orgs"])
             label = classify_final_label(
                 field_not_confirmed=field_not_confirmed,
@@ -819,13 +919,18 @@ class ResearchPipeline:
                     for link in cluster_links
                 ),
             )
+            evidence_signals = _maturity_signals(research)
+            evidence_details = {}
+            if evidence_floor > raw_maturity:
+                evidence_signals["topic_floor_applied"] = evidence_floor
+                evidence_details["raw_cluster_total"] = raw_maturity
             analyses.append(
                 {
                     "research_cluster_id": research.cluster_id,
                     "research_cluster": research.model_dump(),
                     "scores": {"evidence_maturity": maturity, "adoption_evidence": adoption_score, "coverage_confidence": coverage_score, "gap_priority": priority},
                     "score_breakdown": {
-                        "evidence_maturity": {"total": maturity, "signals": _maturity_signals(research), "details": {}},
+                        "evidence_maturity": {"total": maturity, "signals": evidence_signals, "details": evidence_details},
                         "adoption_evidence": adoption_breakdown,
                         "coverage_confidence": coverage_breakdown,
                     },
@@ -1138,6 +1243,533 @@ def _clean_terms(values: Any) -> list[str]:
 
 def _contains_hangul(value: str) -> bool:
     return any("\uac00" <= char <= "\ud7a3" for char in value)
+
+
+def _topic_evidence_floor(academic_records: list[Any], scholar_items: list[dict[str, Any]]) -> int:
+    structured_source_count = len({record.source_id for record in academic_records if getattr(record, "source_id", None)})
+    search_source_count = len({item.get("url") or item.get("title") for item in scholar_items if item.get("url") or item.get("title")})
+    source_count = max(structured_source_count, search_source_count)
+    if source_count == 0:
+        return 0
+
+    breadth = min(source_count, 5) / 5 * 50
+    citation_total = sum(min(_citation_count(item), 100) for item in scholar_items)
+    citation_score = min(citation_total / 60 * 20, 20)
+
+    deployment_hits = 0
+    for record in academic_records:
+        text = " ".join(
+            str(value or "")
+            for value in (
+                getattr(record, "source_title", None),
+                getattr(record, "canonical_claim", None),
+                getattr(record, "evidence_span", None),
+            )
+        )
+        if _mentions_deployment_context(text):
+            deployment_hits += 1
+    if deployment_hits == 0:
+        deployment_hits = sum(1 for item in scholar_items if _mentions_deployment_context(f"{item.get('title', '')} {item.get('snippet', '')}"))
+    deployment_score = min(deployment_hits, 2) / 2 * 15
+
+    supports_count = sum(getattr(record, "result_direction", None) in {"supports", "mixed"} for record in academic_records)
+    direction_score = 10 if supports_count >= 2 else 5 if supports_count == 1 else 0
+
+    return max(0, min(round(breadth + citation_score + deployment_score + direction_score), 90))
+
+
+def _topic_adoption_floor(adoption_records: list[Any]) -> int:
+    uses = [record for record in adoption_records if getattr(record, "relation", None) == "uses"]
+    if not uses:
+        return 0
+
+    by_subject: dict[str, list[int]] = {}
+    for record in uses:
+        subject = normalize_text(getattr(record, "subject_canonical", None) or getattr(record, "subject_raw", None))
+        if not subject:
+            continue
+        by_subject.setdefault(subject, []).append(_adoption_record_points(record))
+
+    organization_scores = []
+    for scores in by_subject.values():
+        ordered = sorted(scores, reverse=True)
+        weighted = sum(score * (1 if index == 0 else 0.5 if index == 1 else 0) for index, score in enumerate(ordered))
+        organization_scores.append(min(round(weighted), 35))
+
+    if not organization_scores:
+        return 0
+
+    org_count = len(organization_scores)
+    breadth_bonus = {1: 0, 2: 8, 3: 15}.get(org_count, 20)
+    total = max(0, min(sum(sorted(organization_scores, reverse=True)[:3]) + breadth_bonus, 90))
+    if all(getattr(record, "usage_context", None) == "vendor_product_integration" for record in uses):
+        total = min(total, 70)
+    return total
+
+
+def _fallback_adoption_records(items: list[dict[str, Any]], existing_source_ids: set[str]) -> list[AdoptionEvidenceRecord]:
+    records: list[AdoptionEvidenceRecord] = []
+    for item in items:
+        sid = source_id(item)
+        if sid in existing_source_ids:
+            continue
+        text = f"{item.get('title', '')} {item.get('snippet', '')}"
+        if not _looks_like_industry_adoption_result(item):
+            continue
+        subject = _trusted_industry_subject(item)
+        if not subject:
+            continue
+        technology = _fallback_technology(item)
+        if not technology:
+            continue
+        evidence_span = _fallback_evidence_span(item)
+        if not evidence_span:
+            continue
+        stage = "production" if _mentions_production_use(text) else "unknown"
+        use_case = _fallback_use_case(text)
+        records.append(
+            AdoptionEvidenceRecord(
+                record_id=stable_id("adopt_fallback", sid, evidence_span),
+                source_id=sid,
+                source_url=item.get("url") or item.get("link") or "",
+                source_title=item.get("title") or "제목 없음",
+                published_at=item.get("published_at") or item.get("publishedAt"),
+                technology_raw=technology,
+                technology_canonical=normalize_text(technology),
+                use_case_raw=use_case,
+                use_case_canonical=normalize_text(use_case) or None,
+                context_raw=_source_hostname(item),
+                context_canonical=normalize_text(_source_hostname(item)) or None,
+                expected_value_raw=_fallback_expected_value(text),
+                expected_value_canonical=normalize_text(_fallback_expected_value(text)) or None,
+                canonical_claim=evidence_span,
+                evidence_span=evidence_span,
+                extraction_confidence=0.6,
+                query_family=item.get("query_family"),
+                subject_raw=subject,
+                subject_canonical=normalize_text(subject),
+                relation="uses",
+                usage_context="vendor_product_integration",
+                adoption_stage=stage,
+                deployment_unit=use_case,
+                project_name=None,
+                event_date=None,
+                explicit_barriers=[],
+            )
+        )
+        existing_source_ids.add(sid)
+    return records
+
+
+def _adoption_record_points(record: Any) -> int:
+    stage = getattr(record, "adoption_stage", None) or "unknown"
+    context = getattr(record, "usage_context", None) or "unknown"
+    if context == "end_user_use":
+        points = {"production": 45, "limited_deployment": 25, "pilot": 12, "unknown": 18}.get(stage, 18)
+    elif context == "vendor_internal_use":
+        points = {"production": 28, "limited_deployment": 16, "pilot": 8, "unknown": 12}.get(stage, 12)
+    elif context == "vendor_product_integration":
+        points = {"production": 35, "limited_deployment": 22, "pilot": 12, "unknown": 18}.get(stage, 18)
+    else:
+        points = 8
+
+    text = " ".join(
+        str(value or "")
+        for value in (
+            getattr(record, "canonical_claim", None),
+            getattr(record, "evidence_span", None),
+            getattr(record, "source_title", None),
+        )
+    )
+    if _mentions_production_use(text):
+        points = max(points, 28 if context == "vendor_product_integration" else 24)
+    return points
+
+
+def _citation_count(item: dict[str, Any]) -> int:
+    for key in ("citationCount", "citation_count", "citedByCount", "cited_by_count", "citations"):
+        value = item.get(key)
+        if isinstance(value, (int, float)):
+            return max(0, int(value))
+        if isinstance(value, str):
+            digits = re.sub(r"\D+", "", value)
+            if digits:
+                return int(digits)
+    return 0
+
+
+def _mentions_deployment_context(text: str) -> bool:
+    normalized = normalize_text(text)
+    markers = (
+        "deployment",
+        "deploy",
+        "production",
+        "serving",
+        "inference",
+        "edge",
+        "real world",
+        "real-world",
+        "practical",
+        "on-device",
+        "온디바이스",
+        "배포",
+        "운영",
+        "실서비스",
+        "현장",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _mentions_production_use(text: str) -> bool:
+    normalized = normalize_text(text)
+    markers = (
+        "production deployment",
+        "production ready",
+        "production-ready",
+        "production serving",
+        "deployed",
+        "rollout",
+        "customer deployment",
+        "live system",
+        "serving",
+        "운영",
+        "상용",
+        "도입",
+        "구축",
+        "현장 적용",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _mentions_explicit_adoption_use(text: str) -> bool:
+    normalized = normalize_text(text)
+    required_markers = (
+        "production",
+        "production-ready",
+        "deployed",
+        "deployment",
+        "serving",
+        "rollout",
+        "customer",
+        "live system",
+        "운영",
+        "상용",
+        "도입",
+        "구축",
+        "현장 적용",
+        "서비스",
+        "운용",
+        "애플리케이션",
+        "어플리케이션",
+        "솔루션",
+        "플랫폼",
+        "객체탐지",
+        "객체 탐지",
+        "object detection",
+        "application",
+        "solution",
+        "platform",
+    )
+    weak_only_markers = ("survey", "overview", "comprehensive study", "tutorial", "day ")
+    if any(marker in normalized for marker in required_markers):
+        return not any(marker in normalized for marker in weak_only_markers)
+    return False
+
+
+def _looks_like_industry_adoption_result(item: dict[str, Any]) -> bool:
+    host = _source_hostname(item)
+    if not host or _is_non_industry_host(host):
+        return False
+    text = f"{item.get('title', '')} {item.get('snippet', '')}"
+    if not _mentions_explicit_adoption_use(text):
+        return False
+    if not _has_query_overlap(item, text):
+        return False
+    return True
+
+
+def _trusted_industry_subject(item: dict[str, Any]) -> str | None:
+    host = _source_hostname(item)
+    if not host or _is_non_industry_host(host):
+        return None
+    title_subject = _subject_from_title(str(item.get("title") or ""))
+    if title_subject:
+        return title_subject
+    if not (
+        host.endswith(".com")
+        or host.endswith(".ai")
+        or host.endswith(".io")
+        or (host.endswith(".kr") and ".or.kr" not in host and ".ac.kr" not in host and ".go.kr" not in host)
+    ):
+        return None
+    label = _registered_domain_label(host)
+    if label in {"medium", "reddit", "github", "wikipedia", "arxiv"}:
+        return None
+    return _format_subject_label(label)
+
+
+def _subject_from_title(title: str) -> str | None:
+    title = title.strip()
+    if not title:
+        return None
+    korean_match = re.match(r"^([A-Za-z0-9가-힣][A-Za-z0-9가-힣 .&+/-]{1,38}?)(?:가|이|은|는|에서)\s", title)
+    if korean_match:
+        candidate = korean_match.group(1).strip()
+        if not _is_generic_adoption_subject(normalize_text(candidate)):
+            return candidate
+    english_match = re.match(
+        r"^([A-Z][A-Za-z0-9 .&+/-]{1,38}?)(?:\s+(?:uses|deploys|launches|introduces|announces|builds|optimizes|serves|powers)\b|:)",
+        title,
+    )
+    if english_match:
+        candidate = english_match.group(1).strip()
+        if not _is_generic_adoption_subject(normalize_text(candidate)):
+            return candidate
+    leading_brand = re.match(r"^([A-Z][A-Za-z0-9+.-]{1,24})(?:\s|:|-)", title)
+    if leading_brand:
+        candidate = leading_brand.group(1).strip()
+        if not _is_generic_adoption_subject(normalize_text(candidate)):
+            return candidate
+    return None
+
+
+def _registered_domain_label(host: str) -> str:
+    parts = [part for part in host.split(".") if part and part not in {"www", "m", "developer", "developers", "docs", "blog", "blogs", "cloud"}]
+    if len(parts) >= 3 and parts[-2] in {"co", "or", "ac", "go"}:
+        return parts[-3]
+    if len(parts) >= 2:
+        return parts[-2]
+    return parts[0] if parts else host
+
+
+def _format_subject_label(label: str) -> str:
+    known_acronyms = {"aws", "ibm", "amd", "lg", "kt", "sk", "skt", "nvidia"}
+    if label in known_acronyms:
+        return label.upper()
+    return label.replace("-", " ").title()
+
+
+def _has_query_overlap(item: dict[str, Any], text: str) -> bool:
+    query = str(item.get("query") or "")
+    query_tokens = _meaningful_tokens(query)
+    if not query_tokens:
+        return True
+    text_normalized = normalize_text(text)
+    return any(token in text_normalized for token in query_tokens)
+
+
+def _meaningful_tokens(text: str) -> list[str]:
+    stopwords = {
+        "production",
+        "deployment",
+        "deploy",
+        "case",
+        "study",
+        "inference",
+        "serving",
+        "cloud",
+        "customer",
+        "real",
+        "world",
+        "산업",
+        "적용",
+        "사례",
+        "상용",
+        "서비스",
+        "현장",
+    }
+    tokens = []
+    for token in normalize_text(text).split():
+        if token in stopwords:
+            continue
+        if len(token) < 3 and not _contains_hangul(token):
+            continue
+        tokens.append(token)
+    return tokens[:8]
+
+
+def _is_non_industry_host(host: str) -> bool:
+    blocked = (
+        "arxiv.org",
+        "doi.org",
+        "springer.com",
+        "link.springer.com",
+        "jstor.org",
+        "wikipedia.org",
+        "reddit.com",
+        "linkedin.com",
+        "medium.com",
+        "naver.com",
+        "blog.naver.com",
+        "tistory.com",
+        "velog.io",
+        "brunch.co.kr",
+        "towardsdatascience.com",
+        "researchgate.net",
+        "mdpi.com",
+        "acm.org",
+        "ieee.org",
+        "sciencedirect.com",
+        "embeddedvisionsummit.com",
+        "koreascience.kr",
+        "kci.go.kr",
+        "scienceon.kisti.re.kr",
+        "etnews.com",
+        "dbpia.co.kr",
+        "dcs.or.kr",
+        "youtube.com",
+        "github.com",
+    )
+    return any(host == domain or host.endswith(f".{domain}") for domain in blocked)
+
+
+def _source_hostname(item: dict[str, Any]) -> str:
+    url = item.get("url") or item.get("link") or ""
+    try:
+        return urlsplit(url).netloc.lower().removeprefix("www.")
+    except Exception:
+        return ""
+
+
+def _fallback_technology(item: dict[str, Any]) -> str | None:
+    query = str(item.get("query") or "")
+    title = str(item.get("title") or "")
+    for marker in (
+        " production",
+        " inference",
+        " cloud",
+        " case study",
+        " deployment",
+        " 산업",
+        " 상용",
+        " 현장",
+    ):
+        query = query.replace(marker, " ")
+    candidate = query.strip() or title.strip()
+    return candidate[:120] if candidate else None
+
+
+def _fallback_use_case(text: str) -> str:
+    normalized = normalize_text(text)
+    if "serving" in normalized:
+        return "LLM serving"
+    if "inference" in normalized:
+        return "inference optimization"
+    if "cloud" in normalized:
+        return "cloud deployment"
+    if "edge" in normalized:
+        return "edge deployment"
+    if "운영" in normalized or "서비스" in normalized:
+        return "서비스 운영"
+    if "현장" in normalized:
+        return "현장 적용"
+    return "production deployment"
+
+
+def _fallback_expected_value(text: str) -> str | None:
+    normalized = normalize_text(text)
+    if "cost" in normalized or "비용" in normalized:
+        return "cost efficiency"
+    if "latency" in normalized or "latency" in normalized:
+        return "latency reduction"
+    if "memory" in normalized or "메모리" in normalized:
+        return "memory reduction"
+    if "efficient" in normalized or "효율" in normalized:
+        return "efficiency"
+    return None
+
+
+def _fallback_evidence_span(item: dict[str, Any]) -> str:
+    title = str(item.get("title") or "").strip()
+    snippet = str(item.get("snippet") or "").strip()
+    if title and snippet:
+        return f"{title}: {snippet[:240]}"
+    return title or snippet[:240]
+
+
+def _has_actionable_adoption_locus(extraction: Any) -> bool:
+    subject = normalize_text(extraction.subject_canonical or extraction.subject_raw)
+    if not subject or _is_generic_adoption_subject(subject):
+        return False
+
+    if extraction.relation != "uses":
+        return extraction.relation == "does_not_use"
+
+    has_specific_locus = any(
+        normalize_text(value)
+        for value in (
+            extraction.deployment_unit,
+            extraction.project_name,
+            extraction.use_case_raw,
+            extraction.context_raw,
+        )
+    )
+    if not has_specific_locus:
+        return False
+
+    if not extraction.usage_context:
+        return False
+
+    return True
+
+
+def _is_generic_adoption_subject(subject: str) -> bool:
+    generic_subjects = {
+        "ai",
+        "artificial intelligence",
+        "public services",
+        "ai public services",
+        "ai work processes",
+        "work processes",
+        "organizations",
+        "organization",
+        "society",
+        "modern society",
+        "research",
+        "researchers",
+        "qualitative research",
+        "education",
+        "students",
+        "marxism",
+        "marxist theory",
+        "marxian political economy",
+        "historical materialism",
+        "dialectical materialism",
+        "critical theory",
+        "technology",
+        "social structure",
+        "공공 서비스",
+        "ai 공공 서비스",
+        "업무 프로세스",
+        "조직",
+        "사회",
+        "현대 사회",
+        "연구",
+        "연구자",
+        "교육",
+        "학생",
+        "마르크스주의",
+        "마르크스주의 이론",
+        "역사적 물질주의",
+        "변증법적 유물론",
+        "비판 이론",
+        "기술",
+        "사회 구조",
+    }
+    if subject in generic_subjects:
+        return True
+    generic_markers = (
+        " theory",
+        " philosophy",
+        " research",
+        " study",
+        " studies",
+        " 이론",
+        " 철학",
+        " 연구",
+        " 방법론",
+    )
+    return any(subject.endswith(marker) for marker in generic_markers)
 
 
 def _extract_counter_items(result: dict[str, Any]) -> list[dict[str, Any]]:
