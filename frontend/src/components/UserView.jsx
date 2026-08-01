@@ -143,10 +143,8 @@ export default function UserView() {
   const [status, setStatus] = useState('idle') // idle | running | done | error
   const [stage, setStage] = useState(null)
   const [result, setResult] = useState(null)
-  const [artifact, setArtifact] = useState(null)
   const [errorMsg, setErrorMsg] = useState(null)
   const [liveSuggestions, setLiveSuggestions] = useState([])
-  const [showLinerWidget, setShowLinerWidget] = useState(false)
   const [showAllEvidence, setShowAllEvidence] = useState({ scholar: false, adoption: false })
   const [searchNote, setSearchNote] = useState(null) // { mode, query } — 지금 이 순간 실제로 던지고 있는 검색어
   const disconnectRef = useRef(null)
@@ -163,16 +161,12 @@ export default function UserView() {
       if (event.type === 'tool_call' && event.payload?.name === 'search' && event.payload?.body?.query) {
         setSearchNote({ mode: event.payload.mode, query: event.payload.body.query })
       }
-      if (event.type === 'data-atlas') {
-        const atlas = event.payload?.data?.atlasArtifact ?? event.payload?.atlasArtifact
-        if (atlas?.html) setArtifact(atlas)
-      }
     })
     return () => disconnectRef.current?.()
   }, [])
 
   // 제출 전, 타이핑하는 동안 가볍게 /api/suggestions로 추천 검색어를 미리 보여준다.
-  // 입력을 멈추고 잠깐(500ms) 있어야 호출해서, 한 글자씩 칠 때마다 요청이 나가진 않는다.
+  // 입력을 멈추고 잠깐(350ms) 있어야 호출해서, 한 글자씩 칠 때마다 요청이 나가진 않는다.
   useEffect(() => {
     if (status !== 'idle' || topic.trim().length < 2) {
       setLiveSuggestions([])
@@ -191,11 +185,16 @@ export default function UserView() {
           signal: controller.signal,
         })
         const data = await res.json().catch(() => null)
-        setLiveSuggestions(Array.isArray(data?.recommendations) ? data.recommendations : [])
+        // 응답을 기다리는 사이에 더 최신 입력으로 새 요청이 이미 나갔다면 이 응답은 버린다.
+        // (기다리는 중 아무것도 안 쳤으면 suggestAbortRef는 여전히 이 controller를 가리키고
+        // 있어서 정상적으로 반영된다 — "가만히 기다리면 안 뜰 수도 있는" 문제는 아니다.)
+        if (suggestAbortRef.current === controller) {
+          setLiveSuggestions(Array.isArray(data?.recommendations) ? data.recommendations : [])
+        }
       } catch {
         // 보조 기능이라 실패해도 조용히 무시한다 — 사용자가 그냥 계속 타이핑하면 됨.
       }
-    }, 500)
+    }, 350)
 
     return () => clearTimeout(timer)
   }, [topic, status])
@@ -207,12 +206,10 @@ export default function UserView() {
     if (topicOverride) setTopic(topicOverride)
     setStatus('running')
     setResult(null)
-    setArtifact(null)
     setErrorMsg(null)
     setStage(null)
     setSearchNote(null)
     setLiveSuggestions([])
-    setShowLinerWidget(false)
     setShowAllEvidence({ scholar: false, adoption: false })
 
     const controller = new AbortController()
@@ -305,7 +302,18 @@ export default function UserView() {
       <form className="user-view-form" onSubmit={runAnalyze}>
         <input
           value={topic}
-          onChange={(e) => setTopic(e.target.value)}
+          onChange={(e) => {
+            setTopic(e.target.value)
+            // 실시간 추천은 status === 'idle'일 때만 동작하는데, 분석이 끝나거나(done)
+            // 실패한(error) 뒤에는 status가 그 값에 그대로 머물러 있어서 다음 검색어를
+            // 이어서 타이핑해도 추천이 안 뜨는 문제가 있었다. 결과 화면을 보고 있다가
+            // 입력을 다시 건드리기 시작하면 새 시도로 보고 idle로 되돌린다.
+            if (status === 'done' || status === 'error') {
+              setStatus('idle')
+              setResult(null)
+              setErrorMsg(null)
+            }
+          }}
           placeholder={`예: ${topicExample}`}
           disabled={status === 'running'}
         />
@@ -478,76 +486,6 @@ export default function UserView() {
             )
           })()}
 
-          {artifact?.html && (
-            <div className="user-view-liner-toggle">
-              <button
-                type="button"
-                className="liner-toggle-btn"
-                onClick={() => setShowLinerWidget((v) => !v)}
-              >
-                {showLinerWidget ? 'Liner 원본 시각화 접기' : 'Liner 원본 시각화 보기'}
-              </button>
-            </div>
-          )}
-
-          {artifact?.html && showLinerWidget && (
-            <>
-              {/* 안쪽에 별도 스크롤바가 생기지 않도록, 로드되면 내용 높이만큼 iframe 자체 높이를 늘려서
-                  스크롤이 페이지 하나로만 일어나게 한다. */}
-              <iframe
-                title="gap-map"
-                className="gap-map-frame"
-                srcDoc={artifact.html}
-                sandbox="allow-scripts allow-same-origin"
-                onLoad={(e) => {
-                  const iframe = e.currentTarget
-                  const doc = iframe.contentDocument
-                  if (!doc?.documentElement) return
-
-                  // Liner 위젯이 html/body가 아니라 자기 안의 어떤 wrapper div에
-                  // height:100vh + overflow:auto를 직접 걸어서 스스로 스크롤 영역을 만드는
-                  // 경우가 있다. html/body만 풀어서는 그 wrapper까지는 안 풀리니, 실제로
-                  // overflow가 걸린 요소를 전부 찾아서 같이 풀어준다.
-                  const unclamp = () => {
-                    doc.documentElement.style.setProperty('height', 'auto', 'important')
-                    doc.documentElement.style.setProperty('overflow', 'visible', 'important')
-                    if (doc.body) {
-                      doc.body.style.setProperty('height', 'auto', 'important')
-                      doc.body.style.setProperty('min-height', '0', 'important')
-                      doc.body.style.setProperty('overflow', 'visible', 'important')
-                    }
-                    doc.querySelectorAll('*').forEach((el) => {
-                      const cs = doc.defaultView?.getComputedStyle(el)
-                      if (!cs) return
-                      if (['auto', 'scroll'].includes(cs.overflow) || ['auto', 'scroll'].includes(cs.overflowY)) {
-                        el.style.setProperty('overflow', 'visible', 'important')
-                        el.style.setProperty('height', 'auto', 'important')
-                        el.style.setProperty('max-height', 'none', 'important')
-                      }
-                    })
-                  }
-
-                  const resize = () => {
-                    unclamp()
-                    const h = Math.max(doc.documentElement.scrollHeight, doc.body?.scrollHeight || 0)
-                    iframe.style.height = `${h}px`
-                  }
-                  resize()
-
-                  // 차트 라이브러리가 로드 직후 비동기로 그려지는 경우 크기가 처음엔 작게
-                  // 잡혀서 한 번으로는 부족하다. 계속 감시해서 늘어나면 다시 맞춘다.
-                  if ('ResizeObserver' in window && doc.body) {
-                    const ro = new ResizeObserver(resize)
-                    ro.observe(doc.body)
-                  } else {
-                    setTimeout(resize, 200)
-                    setTimeout(resize, 600)
-                    setTimeout(resize, 1200)
-                  }
-                }}
-              />
-            </>
-          )}
         </div>
       )}
     </div>

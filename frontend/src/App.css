@@ -147,7 +147,7 @@
   flex-direction: column;
   align-items: center;
   gap: 10px;
-  margin-top: -26px;
+  margin-top: -14px;
   margin-bottom: 36px;
   animation: rise-in 0.2s ease both;
 }
@@ -538,33 +538,6 @@
 
 /* Liner 원본 시각화 — 우리 스코어 카드와 같은 숫자를 중복해서 보여주는 위젯이라
    기본은 접어두고, 궁금한 사람만 펼쳐볼 수 있게 토글로 둔다. */
-.user-view-liner-toggle {
-  width: 100%;
-  display: flex;
-  justify-content: center;
-  margin-bottom: 12px;
-}
-
-.liner-toggle-btn {
-  background: transparent;
-  border: 1px dashed var(--border);
-  color: var(--text-muted);
-  font-size: 12.5px;
-  font-weight: 600;
-  padding: 7px 16px;
-  border-radius: 999px;
-  transition: border-color 0.15s ease, color 0.15s ease;
-}
-
-.liner-toggle-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent-2);
-}
-
-.user-view-result .gap-map-frame {
-  width: 100%;
-}
-
 .app-header {
   display: flex;
   align-items: center;
