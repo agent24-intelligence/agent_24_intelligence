@@ -1,15 +1,39 @@
-"""Full application-gap research pipeline orchestration."""
+"""Research-to-Reality pipeline with deterministic linkage and scoring."""
+
+from __future__ import annotations
 
 import os
 from typing import Any
 
 from events import emit_event
+from evidence_logic import (
+    build_adoption_clusters,
+    build_candidate_connections,
+    build_research_clusters,
+    calculate_adoption_evidence,
+    calculate_coverage_confidence,
+    calculate_gap_priority,
+    classify_gap_types,
+    classify_final_label,
+    deduplicate_records,
+    make_cluster_link,
+    should_deep_research,
+    normalize_text,
+    source_id,
+    stable_id,
+)
+from evidence_models import AdoptionEvidenceRecord, AcademicEvidenceRecord, AdoptionCluster, ClusterLink, ResearchCluster
 from liner_client import LinerClient
-from openai_agents import ResearchAgents
+from openai_agents import (
+    AdoptionExtractionBatch,
+    AcademicExtractionBatch,
+    ResearchAgents,
+)
+from scoring_config import MAX_ADOPTION_CLUSTERS, MAX_LINK_CANDIDATES_PER_RESEARCH, MAX_RESEARCH_CLUSTERS
 
 
 class ResearchPipeline:
-    """Run the staged research and verification workflow."""
+    """Run search, structure, linkage, scoring, verification, and visualization."""
 
     def __init__(self, liner: LinerClient | None = None, agents: ResearchAgents | None = None):
         self.liner = liner or LinerClient()
@@ -24,100 +48,179 @@ class ResearchPipeline:
         max_results: int = 10,
     ) -> dict[str, Any]:
         scope = await self._calibrate_scope(topic)
-        scholar_queries, query_generations = await self._build_scholar_queries(
-            topic,
-            scope,
-            scholar_query,
-        )
+        if scope.status == "unconfirmed" or not scope.selected_topics:
+            return self._unconfirmed_result(topic, scope)
 
+        scholar_queries, query_generations = await self._build_scholar_queries(topic, scope, scholar_query)
         scholar = await self._run_scholar_scout(scholar_queries, max_results=max_results)
+        scholar_items = _tag_items(scholar.get("results", []), "academic")
+
+        academic_records, academic_extraction_meta = await self._extract_academic_records(scholar_items)
+        academic_records = deduplicate_records(academic_records)
+        research_clusters = build_research_clusters(academic_records, limit=MAX_RESEARCH_CLUSTERS)
+        emit_event(
+            "tool_result",
+            {
+                "record_count": len(academic_records),
+                "cluster_count": len(research_clusters),
+                "extraction": academic_extraction_meta,
+            },
+            stage="research_clustering",
+            source="system",
+        )
+
+        if not research_clusters:
+            return self._insufficient_result(
+                topic=topic,
+                scope=scope,
+                scholar=scholar,
+                scholar_queries=scholar_queries,
+                query_generations=query_generations,
+                academic_records=academic_records,
+            )
+
         vocabulary = await self._run_vocabulary_bridge(topic, scholar)
+        query_specs = self._build_adoption_query_specs(vocabulary, adoption_queries)
+        adoption = await self._run_adoption_scout(query_specs, max_results=max_results)
+        adoption_items = _tag_items(_flatten_results(adoption), "adoption")
+        adoption_records, adoption_extraction_meta = await self._extract_adoption_records(adoption_items)
+        adoption_records = deduplicate_records(adoption_records)
+        adoption_clusters = build_adoption_clusters(adoption_records, limit=MAX_ADOPTION_CLUSTERS)
+        emit_event(
+            "tool_result",
+            {
+                "record_count": len(adoption_records),
+                "cluster_count": len(adoption_clusters),
+                "extraction": adoption_extraction_meta,
+            },
+            stage="adoption_clustering",
+            source="system",
+        )
 
-        adoption_queries = adoption_queries or vocabulary.terms
-        adoption = await self._run_adoption_scout(adoption_queries, max_results=max_results)
+        links = await self._run_cluster_linkage(research_clusters, adoption_clusters)
+        coverage = self._coverage(
+            academic_records=academic_records,
+            adoption_records=adoption_records,
+            scholar_items=scholar_items,
+            adoption_items=adoption_items,
+            query_family_count=_query_family_count(vocabulary.query_families, query_specs),
+            mapping_confidence=vocabulary.mapping_confidence,
+            structured_record_count=len(academic_records) + len(adoption_records),
+            total_relevant_results=academic_extraction_meta["total_relevant_results"] + adoption_extraction_meta["total_relevant_results"],
+            adversarial=None,
+        )
+        analyses = self._evaluate_all(research_clusters, adoption_clusters, links, coverage, scope.status == "unconfirmed")
+        top_candidate = _top_analysis(analyses)
 
-        gap_candidate = await self._run_gap_candidate(topic, scholar, adoption)
-        counter_query = self._counter_query(topic, gap_candidate.rationale)
+        counter_query = self._counter_query(topic, top_candidate)
         counter_result = await self._run_adversarial_verifier(counter_query)
+        counter_items = _extract_counter_items(counter_result)
         counter_evidence = _extract_counter_evidence(counter_result)
-        final_gap = _downgrade_for_counter_evidence(gap_candidate.model_dump(), counter_evidence)
+        counter_records, counter_meta = await self._extract_adoption_records(counter_items)
+        if counter_records:
+            adoption_records = deduplicate_records([*adoption_records, *counter_records])
+            adoption_clusters = build_adoption_clusters(adoption_records, limit=MAX_ADOPTION_CLUSTERS)
+            links = await self._run_cluster_linkage(research_clusters, adoption_clusters)
 
-        deep_research = await self._run_conditional_deep_research(
-            topic,
-            final_gap,
-            counter_evidence,
+        coverage = self._coverage(
+            academic_records=academic_records,
+            adoption_records=adoption_records,
+            scholar_items=scholar_items,
+            adoption_items=[*adoption_items, *counter_items],
+            query_family_count=_query_family_count(vocabulary.query_families, query_specs),
+            mapping_confidence=vocabulary.mapping_confidence,
+            structured_record_count=len(academic_records) + len(adoption_records),
+            total_relevant_results=academic_extraction_meta["total_relevant_results"] + adoption_extraction_meta["total_relevant_results"] + counter_meta["total_relevant_results"],
+            adversarial={
+                "performed": True,
+                "timed_out": bool(counter_result.get("timed_out")),
+                "result_count": len({item.get("url") or item.get("title") for item in counter_items if item.get("url") or item.get("title")}),
+            },
         )
-        visualization = await self._run_gap_map(
-            topic,
-            final_gap,
-            max_results=max_results,
-        )
+        analyses = self._evaluate_all(research_clusters, adoption_clusters, links, coverage, False)
+        top_candidate = _top_analysis(analyses)
 
-        result = {
-            "topic": topic,
-            "scope": scope.model_dump(),
-            "queries": {
-                "scholar": scholar_queries,
-                "adoption": adoption_queries,
-                "counter": counter_query,
-            },
-            "scores": {
-                "evidence_maturity": final_gap["evidence_maturity"],
-                "adoption_evidence": final_gap["adoption_evidence"],
-                "coverage_confidence": final_gap["coverage_confidence"],
-            },
-            "label": final_gap["gap_label"],
-            "rationale": final_gap["rationale"],
-            # 어떤 게 연결됐고, 어떤 게 안 됐고(진짜 갭), 뭐가 더 연결될 여지가 있는지
-            # 사용자가 바로 볼 수 있게 rationale 문단과 별개로 최상위에도 노출한다.
-            "connected_points": final_gap.get("connected_points", []),
-            "gap_points": final_gap.get("gap_points", []),
-            "potential_points": final_gap.get("potential_points", []),
-            "evidence": scholar.get("results", []) + _flatten_results(adoption),
-            "counter_evidence": counter_evidence,
-            "deep_research": deep_research,
-            "visualization": visualization,
-            # Keep the raw Search responses available during the transition period.
-            "scholar": scholar,
-            "adoption": adoption,
-            "scholar_query_generation": query_generations,
-            "vocabulary": vocabulary.model_dump(),
-            "gap_candidate": final_gap,
-        }
+        deep_target_id = top_candidate.get("research_cluster_id")
+        deep_research = await self._run_conditional_deep_research(topic, top_candidate, counter_evidence)
+        deep_items = deep_research.pop("adoption_items", [])
+        deep_record_dicts = deep_research.pop("adoption_records", [])
+        if deep_record_dicts:
+            deep_records = [AdoptionEvidenceRecord.model_validate(item) for item in deep_record_dicts]
+            adoption_records = deduplicate_records([*adoption_records, *deep_records])
+            adoption_items = [*adoption_items, *deep_items]
+            adoption_clusters = build_adoption_clusters(adoption_records, limit=MAX_ADOPTION_CLUSTERS)
+            links = await self._run_cluster_linkage(research_clusters, adoption_clusters)
+            coverage = self._coverage(
+                academic_records=academic_records,
+                adoption_records=adoption_records,
+                scholar_items=scholar_items,
+                adoption_items=[*adoption_items, *counter_items],
+                query_family_count=_query_family_count(vocabulary.query_families, query_specs),
+                mapping_confidence=vocabulary.mapping_confidence,
+                structured_record_count=len(academic_records) + len(adoption_records),
+                total_relevant_results=academic_extraction_meta["total_relevant_results"] + adoption_extraction_meta["total_relevant_results"] + counter_meta["total_relevant_results"] + len(deep_items),
+                adversarial={
+                    "performed": True,
+                    "timed_out": bool(counter_result.get("timed_out")),
+                    "result_count": len({item.get("url") or item.get("title") for item in [*counter_items, *deep_items] if item.get("url") or item.get("title")}),
+                },
+            )
+            analyses = self._evaluate_all(research_clusters, adoption_clusters, links, coverage, False)
+            top_candidate = next((item for item in analyses if item["research_cluster_id"] == deep_target_id), _top_analysis(analyses))
+        deep_review = deep_research.get("review", {})
+        if deep_review.get("explicit_outcome_mismatch"):
+            top_candidate.setdefault("gap_types", []).append("outcome_gap")
+            top_candidate["gap_types"] = list(dict.fromkeys(top_candidate["gap_types"]))
+        top_candidate["confirmed_barriers"] = list(dict.fromkeys(deep_review.get("confirmed_barriers", []) + top_candidate.get("confirmed_barriers", [])))
+        top_candidate["inferred_barriers"] = list(dict.fromkeys(deep_review.get("inferred_barriers", []) + top_candidate.get("inferred_barriers", [])))
+
+        narrative = await self._run_gap_narrative(top_candidate, research_clusters, adoption_clusters)
+        top_candidate.update(narrative)
+
+        visualization = await self._run_gap_map(topic, top_candidate, max_results=max_results)
+        result = self._build_response(
+            topic=topic,
+            scope=scope,
+            scholar=scholar,
+            adoption=adoption,
+            scholar_queries=scholar_queries,
+            adoption_query_specs=query_specs,
+            counter_query=counter_query,
+            vocabulary=vocabulary,
+            academic_records=academic_records,
+            adoption_records=adoption_records,
+            research_clusters=research_clusters,
+            adoption_clusters=adoption_clusters,
+            links=links,
+            analyses=analyses,
+            top_candidate=top_candidate,
+            counter_evidence=counter_evidence,
+            deep_research=deep_research,
+            visualization=visualization,
+            query_generations=query_generations,
+        )
         emit_event(
             "finish",
             {
                 "topic": topic,
                 "label": result["label"],
-                "scholar_results": len(scholar.get("results", [])),
-                "adoption_searches": len(adoption),
+                "scores": result["scores"],
+                "research_clusters": len(research_clusters),
+                "adoption_clusters": len(adoption_clusters),
                 "counter_evidence": len(counter_evidence),
             },
-            stage="gap_map",
+            stage="finalization",
             source="system",
         )
         return result
 
     async def _calibrate_scope(self, topic: str):
-        emit_event(
-            "note",
-            {"text": "Scope Calibrator: 입력 주제의 범위를 판정합니다."},
-            stage="scope_calibrator",
-            source="system",
-        )
+        emit_event("note", {"text": "Scope Calibrator: 입력 주제의 범위를 판정합니다."}, stage="scope_calibrator", source="system")
         return await self.agents.scope(topic)
 
-    async def _build_scholar_queries(
-        self,
-        topic: str,
-        scope: Any,
-        scholar_query: str | None,
-    ) -> tuple[list[str], list[dict[str, Any]]]:
+    async def _build_scholar_queries(self, topic: str, scope: Any, scholar_query: str | None) -> tuple[list[str], list[dict[str, Any]]]:
         if scholar_query:
-            return [scholar_query], [
-                {"query": scholar_query, "rationale": "디버깅용 scholar_query를 그대로 사용합니다."}
-            ]
-
+            return [scholar_query], [{"query": scholar_query, "rationale": "디버깅용 scholar_query를 그대로 사용합니다."}]
         emit_event(
             "note",
             {"text": "Scope 결과를 학술 표준 용어와 배포 맥락이 포함된 Scholar 쿼리로 정제합니다."},
@@ -139,165 +242,442 @@ class ResearchPipeline:
         )
         responses = []
         for query in queries:
-            responses.append(
-                await self.liner.search_scholar(
-                    query,
-                    lang="ko",
-                    max_results=max_results,
-                    stage="scholar_scout",
-                )
-            )
+            responses.append(await self.liner.search_scholar(query, lang="ko", max_results=max_results, stage="scholar_scout"))
         return _merge_search_results(responses)
 
     async def _run_vocabulary_bridge(self, topic: str, scholar: dict[str, Any]):
-        emit_event(
-            "note",
-            {"text": "Vocabulary Bridge: 학술 용어를 산업 검색어로 변환합니다."},
-            stage="vocabulary_bridge",
-            source="system",
-        )
+        emit_event("note", {"text": "Vocabulary Bridge: 학술 용어를 산업 검색어와 세 검색 관점으로 변환합니다."}, stage="vocabulary_bridge", source="system")
         return await self.agents.vocabulary_bridge(topic, scholar)
 
-    async def _run_adoption_scout(self, queries: list[str], *, max_results: int) -> list[dict[str, Any]]:
+    def _build_adoption_query_specs(self, vocabulary: Any, overrides: list[str] | None) -> list[tuple[str, str]]:
+        if overrides:
+            return [(query, "manual") for query in overrides]
+        families = vocabulary.query_families or {"technology": vocabulary.terms}
+        specs: list[tuple[str, str]] = []
+        for family in ("technology", "use_case", "context"):
+            for term in families.get(family, []):
+                if term:
+                    specs.append((term, family))
+        if not specs:
+            specs = [(term, "technology") for term in vocabulary.terms]
+        return list(dict.fromkeys(specs))
+
+    async def _run_adoption_scout(self, query_specs: list[tuple[str, str]], *, max_results: int) -> list[dict[str, Any]]:
         emit_event(
             "note",
-            {"text": f"Adoption Scout: 산업 검색어 {len(queries)}개로 도입 증거를 확인합니다."},
+            {"text": f"Adoption Scout: 산업 검색어 {len(query_specs)}개를 세 검색 관점으로 확인합니다."},
             stage="adoption_scout",
             source="system",
         )
-        adoption = []
-        for query in queries:
-            adoption.append(
-                await self.liner.search_web(
-                    query,
-                    lang="ko",
-                    max_results=max_results,
-                    stage="adoption_scout",
+        responses = []
+        for query, family in query_specs:
+            response = await self.liner.search_web(query, lang="ko", max_results=max_results, stage="adoption_scout")
+            tagged = dict(response)
+            tagged["query"] = query
+            tagged["query_family"] = family
+            tagged["results"] = [_tag_item(item, family) for item in response.get("results", [])]
+            responses.append(tagged)
+        return responses
+
+    async def _extract_academic_records(self, items: list[dict[str, Any]]) -> tuple[list[AcademicEvidenceRecord], dict[str, int]]:
+        emit_event("note", {"text": f"Scholar 결과 {len(items)}건에서 학술 적용 주장과 검증 신호를 구조화합니다."}, stage="academic_extraction", source="system")
+        if not items:
+            return [], {"total_relevant_results": 0, "structured_record_count": 0, "failed_count": 0}
+        batch: AcademicExtractionBatch = await self.agents.academic_extract(items)
+        records: list[AcademicEvidenceRecord] = []
+        for extraction in batch.records:
+            if not extraction.is_relevant or extraction.extraction_confidence < 0.55:
+                continue
+            item = items[extraction.source_index] if extraction.source_index < len(items) else None
+            if not item or not extraction.evidence_span or not extraction.technology_canonical:
+                continue
+            records.append(
+                AcademicEvidenceRecord(
+                    record_id=stable_id("acad", source_id(item), extraction.evidence_span),
+                    source_id=source_id(item),
+                    source_url=item.get("url") or item.get("link") or "",
+                    source_title=item.get("title") or "제목 없음",
+                    published_at=item.get("published_at") or item.get("publishedAt"),
+                    citation_count=item.get("citationCount"),
+                    technology_raw=extraction.technology_raw,
+                    technology_canonical=normalize_text(extraction.technology_canonical) or None,
+                    use_case_raw=extraction.use_case_raw,
+                    use_case_canonical=normalize_text(extraction.use_case_canonical) or None,
+                    context_raw=extraction.context_raw,
+                    context_canonical=normalize_text(extraction.context_canonical) or None,
+                    expected_value_raw=extraction.expected_value_raw,
+                    expected_value_canonical=normalize_text(extraction.expected_value_canonical) or None,
+                    canonical_claim=extraction.canonical_claim or extraction.evidence_span,
+                    evidence_span=extraction.evidence_span,
+                    extraction_confidence=extraction.extraction_confidence,
+                    query_family=item.get("query_family"),
+                    is_replication=extraction.is_replication,
+                    is_synthesis=extraction.is_synthesis,
+                    is_real_world=extraction.is_real_world,
+                    is_counter_evidence=extraction.is_counter_evidence,
+                    result_direction=extraction.result_direction,
+                    institutions=extraction.institutions,
                 )
             )
-        return adoption
+        return records, {
+            "total_relevant_results": len(items),
+            "structured_record_count": len(records),
+            "failed_count": max(0, len(items) - len(records)),
+        }
 
-    async def _run_gap_candidate(self, topic: str, scholar: dict[str, Any], adoption: list[dict[str, Any]]):
+    async def _extract_adoption_records(self, items: list[dict[str, Any]]) -> tuple[list[AdoptionEvidenceRecord], dict[str, int]]:
+        emit_event("note", {"text": f"산업 검색 결과 {len(items)}건에서 실제 도입·중단 사건을 구조화합니다."}, stage="adoption_extraction", source="system")
+        if not items:
+            return [], {"total_relevant_results": 0, "structured_record_count": 0, "failed_count": 0}
+        batch: AdoptionExtractionBatch = await self.agents.adoption_extract(items)
+        records: list[AdoptionEvidenceRecord] = []
+        for extraction in batch.records:
+            if not extraction.is_relevant or extraction.extraction_confidence < 0.55:
+                continue
+            item = items[extraction.source_index] if extraction.source_index < len(items) else None
+            if not item or not extraction.evidence_span or not extraction.technology_canonical or not extraction.subject_canonical:
+                continue
+            usage_context = extraction.usage_context if extraction.relation == "uses" else None
+            adoption_stage = extraction.adoption_stage if extraction.relation == "uses" and usage_context != "vendor_product_integration" else None
+            records.append(
+                AdoptionEvidenceRecord(
+                    record_id=stable_id("adopt", source_id(item), extraction.evidence_span),
+                    source_id=source_id(item),
+                    source_url=item.get("url") or item.get("link") or "",
+                    source_title=item.get("title") or "제목 없음",
+                    published_at=item.get("published_at") or item.get("publishedAt"),
+                    technology_raw=extraction.technology_raw,
+                    technology_canonical=normalize_text(extraction.technology_canonical) or None,
+                    use_case_raw=extraction.use_case_raw,
+                    use_case_canonical=normalize_text(extraction.use_case_canonical) or None,
+                    context_raw=extraction.context_raw,
+                    context_canonical=normalize_text(extraction.context_canonical) or None,
+                    expected_value_raw=extraction.expected_value_raw,
+                    expected_value_canonical=normalize_text(extraction.expected_value_canonical) or None,
+                    canonical_claim=extraction.canonical_claim or extraction.evidence_span,
+                    evidence_span=extraction.evidence_span,
+                    extraction_confidence=extraction.extraction_confidence,
+                    query_family=item.get("query_family"),
+                    subject_raw=extraction.subject_raw,
+                    subject_canonical=normalize_text(extraction.subject_canonical) or None,
+                    relation=extraction.relation,
+                    usage_context=usage_context,
+                    adoption_stage=adoption_stage,
+                    deployment_unit=extraction.deployment_unit,
+                    project_name=extraction.project_name,
+                    event_date=extraction.event_date,
+                    explicit_barriers=extraction.explicit_barriers,
+                )
+            )
+        return records, {
+            "total_relevant_results": len(items),
+            "structured_record_count": len(records),
+            "failed_count": max(0, len(items) - len(records)),
+        }
+
+    async def _run_cluster_linkage(self, research_clusters: list[ResearchCluster], adoption_clusters: list[AdoptionCluster]) -> list[ClusterLink]:
         emit_event(
             "note",
-            {"text": "Gap Candidate Generator: 학술·산업 근거를 대조합니다."},
-            stage="gap_candidate_generator",
+            {"text": f"연구 클러스터 {len(research_clusters)}개와 산업 클러스터 {len(adoption_clusters)}개를 네 차원으로 비교합니다."},
+            stage="cluster_linkage",
             source="system",
         )
-        return await self.agents.gap_candidate(topic, scholar, adoption)
-
-    def _counter_query(self, topic: str, rationale: str) -> str:
-        return (
-            f"Find strong counter-evidence that {topic} is already widely deployed in industry. "
-            f"Check product documentation, customer case studies, open-source deployments, standards, "
-            f"job postings, procurement, and industry reports. Candidate rationale: {rationale}"
+        if not research_clusters:
+            return []
+        pairs = []
+        for research in research_clusters:
+            for adoption in adoption_clusters[:MAX_LINK_CANDIDATES_PER_RESEARCH]:
+                pairs.append({"research": _cluster_summary(research), "adoption": _cluster_summary(adoption)})
+        dimensions = {}
+        if pairs:
+            result = await self.agents.cluster_link(pairs)
+            dimensions = {(item.research_cluster_id, item.adoption_cluster_id): item for item in result.links}
+        adoption_by_id = {cluster.cluster_id: cluster for cluster in adoption_clusters}
+        links: list[ClusterLink] = []
+        for research in research_clusters:
+            research_links = []
+            for adoption in adoption_clusters[:MAX_LINK_CANDIDATES_PER_RESEARCH]:
+                item = dimensions.get((research.cluster_id, adoption.cluster_id))
+                if item:
+                    dimension_values = {
+                        "technology": item.technology_match,
+                        "use_case": item.use_case_match,
+                        "context": item.context_match,
+                        "expected_value": item.expected_value_match,
+                    }
+                    link = make_cluster_link(
+                        research,
+                        adoption,
+                        dimension_values,
+                        explanation=item.explanation,
+                        confidence=item.confidence,
+                        matched_on=item.matched_on,
+                        missing_on=item.missing_on,
+                    )
+                else:
+                    link = make_cluster_link(research, adoption)
+                if link.link_type != "unlinked" or link.link_similarity >= 0.30:
+                    research_links.append(link)
+            if not research_links or not any(link.link_type in {"direct", "partial", "blocked"} for link in research_links):
+                research_links.append(make_cluster_link(research, None, explanation="검색 범위 안에서 유효한 산업 연결을 확인하지 못했습니다."))
+            links.extend(research_links)
+        emit_event(
+            "tool_result",
+            {"link_count": len(links), "direct": sum(link.link_type == "direct" for link in links), "partial": sum(link.link_type == "partial" for link in links), "blocked": sum(link.link_type == "blocked" for link in links)},
+            stage="cluster_linkage",
+            source="system",
         )
+        return links
+
+    def _coverage(self, *, academic_records: list[Any], adoption_records: list[Any], scholar_items: list[dict[str, Any]], adoption_items: list[dict[str, Any]], query_family_count: int, mapping_confidence: float, structured_record_count: int, total_relevant_results: int, adversarial: dict[str, Any] | None) -> dict[str, Any]:
+        return calculate_coverage_confidence(
+            unique_academic_sources=len({key for item in scholar_items if (key := item.get("url") or item.get("title"))}),
+            unique_web_sources=len({key for item in adoption_items if (key := item.get("url") or item.get("title"))}),
+            query_family_count=query_family_count,
+            mapping_confidence=mapping_confidence,
+            structured_record_count=structured_record_count,
+            total_relevant_results=total_relevant_results,
+            adversarial_performed=bool(adversarial and adversarial.get("performed")),
+            adversarial_timed_out=bool(adversarial and adversarial.get("timed_out")),
+            adversarial_result_count=int((adversarial or {}).get("result_count", 0)),
+        )
+
+    def _evaluate_all(self, research_clusters: list[ResearchCluster], adoption_clusters: list[AdoptionCluster], links: list[ClusterLink], coverage: dict[str, Any], field_not_confirmed: bool) -> list[dict[str, Any]]:
+        adoption_by_id = {cluster.cluster_id: cluster for cluster in adoption_clusters}
+        by_research: dict[str, list[ClusterLink]] = {}
+        for link in links:
+            by_research.setdefault(link.research_cluster_id, []).append(link)
+        analyses = []
+        for research in research_clusters:
+            cluster_links = by_research.get(research.cluster_id, [])
+            adoption_breakdown = calculate_adoption_evidence(cluster_links, adoption_by_id)
+            coverage_breakdown = coverage
+            maturity = research.evidence_maturity or 0
+            adoption_score = adoption_breakdown["total"]
+            coverage_score = coverage_breakdown["total"]
+            gap_types = classify_gap_types(research, cluster_links, adoption_by_id, coverage_score)
+            direct_production = int(adoption_breakdown["signals"]["direct_production_orgs"])
+            label = classify_final_label(
+                field_not_confirmed=field_not_confirmed,
+                evidence_maturity=maturity,
+                adoption_evidence=adoption_score,
+                coverage_confidence=coverage_score,
+                direct_production_org_count=direct_production,
+            )
+            priority = calculate_gap_priority(maturity, adoption_score, coverage_score)
+            deep, deep_reasons = should_deep_research(
+                contradicts_count=research.contradicts_count,
+                evidence_maturity=maturity,
+                direct_links_exist=any(link.link_type == "direct" for link in cluster_links),
+                blocked_links_exist=any(link.link_type == "blocked" for link in cluster_links),
+                gap_priority=priority,
+                coverage_confidence=coverage_score,
+                high_impact_candidate=priority >= 45,
+                barrier_reason_unknown=any(link.link_type == "blocked" for link in cluster_links) and not any(
+                    adoption_by_id.get(link.adoption_cluster_id or "") and adoption_by_id[link.adoption_cluster_id].explicit_barriers
+                    for link in cluster_links
+                ),
+            )
+            analyses.append(
+                {
+                    "research_cluster_id": research.cluster_id,
+                    "research_cluster": research.model_dump(),
+                    "scores": {"evidence_maturity": maturity, "adoption_evidence": adoption_score, "coverage_confidence": coverage_score, "gap_priority": priority},
+                    "score_breakdown": {
+                        "evidence_maturity": {"total": maturity, "signals": _maturity_signals(research), "details": {}},
+                        "adoption_evidence": adoption_breakdown,
+                        "coverage_confidence": coverage_breakdown,
+                    },
+                    "label": label,
+                    "gap_types": gap_types,
+                    "links": [link.model_dump() for link in cluster_links],
+                    "candidate_connections": [candidate.model_dump() for candidate in build_candidate_connections(cluster_links)],
+                    "confirmed_barriers": [barrier for link in cluster_links for barrier in adoption_by_id.get(link.adoption_cluster_id or "", AdoptionCluster(cluster_id="", subject="", technology="")).explicit_barriers if link.link_type == "blocked"],
+                    "inferred_barriers": [],
+                    "should_deep_research": deep,
+                    "deep_research_reasons": deep_reasons,
+                    "rationale": "",
+                    "connected_points": [],
+                    "gap_points": [],
+                    "potential_points": [],
+                }
+            )
+        emit_event(
+            "tool_result",
+            {"analysis_count": len(analyses), "labels": {label: sum(item["label"] == label for item in analyses) for label in {item["label"] for item in analyses}}},
+            stage="score_calculation",
+            source="system",
+        )
+        return analyses
 
     async def _run_adversarial_verifier(self, counter_query: str) -> dict[str, Any]:
-        emit_event(
-            "note",
-            {"text": "갭을 선언하기 전에 산업에서 이미 널리 쓰인다는 반증을 검색합니다."},
-            stage="adversarial_verifier",
-            source="system",
-        )
-        return await self.liner.search_agent(
-            [{"role": "user", "content": counter_query}],
-            mode="general",
-            lang="ko",
-            stage="adversarial_verifier",
+        emit_event("note", {"text": "갭을 선언하기 전에 동일한 사용 사례·환경에서 이미 운영 중이라는 반증을 검색합니다."}, stage="adversarial_verifier", source="system")
+        return await self.liner.search_agent([{"role": "user", "content": counter_query}], mode="general", lang="ko", stage="adversarial_verifier")
+
+    def _counter_query(self, topic: str, analysis: dict[str, Any]) -> str:
+        cluster = analysis.get("research_cluster", {})
+        return (
+            f"Find direct evidence that {topic} is already used in production for the same technology "
+            f"({cluster.get('technology')}), use case ({cluster.get('use_case')}), and context ({cluster.get('context')}). "
+            "Prefer customer deployments, production case studies, or operator reports. Do not treat plans, compatibility, or job postings as production adoption."
         )
 
-    async def _run_conditional_deep_research(
-        self,
-        topic: str,
-        gap: dict[str, Any],
-        counter_evidence: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        if not gap["should_deep_research"]:
-            reason = "근거 충돌·부족 또는 고임팩트 저확신 조건이 없어 Deep Research를 건너뜁니다."
-            emit_event(
-                "note",
-                {"text": reason},
-                stage="conditional_deep_research",
-                source="system",
-            )
-            return {"used": False, "timed_out": False, "reason": reason}
-
-        emit_event(
-            "note",
-            {"text": "1차 근거가 부족하거나 모순되어 Deep Research로 조건부 승격합니다."},
-            stage="conditional_deep_research",
-            source="system",
-        )
+    async def _run_conditional_deep_research(self, topic: str, analysis: dict[str, Any], counter_evidence: list[dict[str, Any]]) -> dict[str, Any]:
+        if not analysis.get("should_deep_research"):
+            reason = "코드 계산 결과 충돌·중단·검색 부족에 해당하지 않아 Deep Research를 건너뜁니다."
+            emit_event("note", {"text": reason}, stage="conditional_deep_research", source="system")
+            return {"used": False, "timed_out": False, "status": "skipped", "reason": reason, "review": {}}
+        reasons = analysis.get("deep_research_reasons", [])
+        emit_event("note", {"text": f"{'; '.join(reasons)} → Deep Research로 조건부 승격합니다."}, stage="conditional_deep_research", source="system")
         timeout_s = float(os.environ.get("DEEP_RESEARCH_TIMEOUT_S", "25"))
         research = await self.liner.deep_research(
-            [
-                {
-                    "role": "user",
-                    "content": (
-                        f"Investigate the application gap for {topic}. Compare academic maturity, "
-                        f"industrial adoption, and the following counter-evidence: {counter_evidence}"
-                    ),
-                }
-            ],
+            [{"role": "user", "content": f"Investigate the application gap for {topic}. Analyze this candidate: {analysis}. Counter-evidence: {counter_evidence}"}],
             lang="ko",
             timeout_s=timeout_s,
             stage="conditional_deep_research",
         )
         report = _extract_report(research)
         if research.get("timed_out"):
-            fallback_reason = "Deep Research 타임아웃 → Search 근거로 잠정 결론을 유지하고 확신도를 낮춥니다."
-            emit_event(
-                "note",
-                {"text": fallback_reason},
-                stage="conditional_deep_research",
-                source="system",
-            )
-            return {
-                "used": True,
-                "timed_out": True,
-                "reason": fallback_reason,
-                "events_received": len(research.get("events", [])),
-                "report": report,
-            }
+            reason = "Deep Research timeout → Search 근거로 잠정 결론을 유지하고 확신도를 낮춥니다."
+            emit_event("note", {"text": reason}, stage="conditional_deep_research", source="system")
+            return {"used": True, "timed_out": True, "status": "timeout", "reason": reason, "events_received": len(research.get("events", [])), "report": report, "review": {}, "adoption_items": [], "adoption_records": []}
+        review = await self.agents.review_deep_research(report) if report else None
+        deep_items = _extract_counter_items(research)
+        deep_records, _ = await self._extract_adoption_records(deep_items)
         return {
             "used": True,
             "timed_out": False,
+            "status": "completed",
             "reason": "조건부 승격 완료",
             "events_received": len(research.get("events", [])),
             "report": report,
+            "review": review.model_dump() if review else {},
+            "adoption_items": deep_items,
+            "adoption_records": [record.model_dump() for record in deep_records],
         }
 
-    async def _run_gap_map(self, topic: str, gap: dict[str, Any], *, max_results: int) -> dict[str, Any]:
-        emit_event(
-            "note",
-            {"text": "최종 점수와 근거 요약을 Gap Map 시각화로 전달합니다."},
-            stage="gap_map",
-            source="system",
-        )
-        query = (
-            f"Application gap comparison for {topic}: academic evidence maturity "
-            f"{gap['evidence_maturity']}/100, industrial adoption evidence "
-            f"{gap['adoption_evidence']}/100, coverage confidence "
-            f"{gap['coverage_confidence']}/100. Label: {gap['gap_label']}."
-        )
-        visualization = await self.liner.visualize(
-            query,
-            is_search_context=True,
-            max_results=max_results,
-            appearance="light",
-            stage="gap_map",
-        )
+    async def _run_gap_narrative(self, analysis: dict[str, Any], research_clusters: list[ResearchCluster], adoption_clusters: list[AdoptionCluster]) -> dict[str, Any]:
+        try:
+            result = await self.agents.gap_narrative({"analysis": analysis, "research_clusters": [item.model_dump() for item in research_clusters], "adoption_clusters": [item.model_dump() for item in adoption_clusters]})
+            return result.model_dump()
+        except Exception as exc:
+            emit_event("error", {"name": "gap_narrator", "message": str(exc)}, stage="finalization", source="openai")
+            return _fallback_narrative(analysis)
+
+    async def _run_gap_map(self, topic: str, analysis: dict[str, Any], *, max_results: int) -> dict[str, Any]:
+        emit_event("note", {"text": "최종 점수와 연구·산업 연결 구조를 Gap Map 시각화로 전달합니다."}, stage="gap_map", source="system")
+        scores = analysis.get("scores", {})
+        query = f"Application gap comparison for {topic}: {scores}. Label: {analysis.get('label')}. Gap types: {analysis.get('gap_types', [])}."
+        visualization = await self.liner.visualize(query, is_search_context=True, max_results=max_results, appearance="light", stage="gap_map")
+        return {"requested": True, "artifact_received": _has_event_type(visualization, "data-atlas"), "events_received": len(visualization.get("events", []))}
+
+    def _insufficient_result(self, *, topic: str, scope: Any, scholar: dict[str, Any], scholar_queries: list[str], query_generations: list[dict[str, Any]], academic_records: list[Any]) -> dict[str, Any]:
+        reason = "학술 검색 결과에서 점수 계산에 필요한 적용 주장을 구조화하지 못했습니다."
+        emit_event("note", {"text": reason}, stage="finalization", source="system")
+        result = {
+            "topic": topic,
+            "scope": scope.model_dump(),
+            "queries": {"scholar": scholar_queries, "adoption": [], "counter": ""},
+            "scores": {"evidence_maturity": 0, "adoption_evidence": 0, "coverage_confidence": 0, "gap_priority": 0},
+            "label": "insufficient_evidence",
+            "gap_types": ["possible_no_adoption_link"],
+            "rationale": reason,
+            "connected_points": [],
+            "gap_points": [],
+            "potential_points": [],
+            "evidence": scholar.get("results", []),
+            "counter_evidence": [],
+            "deep_research": {"used": False, "timed_out": False, "status": "skipped", "reason": reason},
+            "visualization": {"requested": False, "artifact_received": False},
+            "academic_evidence": [record.model_dump() for record in academic_records],
+            "adoption_evidence": [],
+            "research_clusters": [],
+            "adoption_clusters": [],
+            "links": [],
+            "gap_candidates": [],
+            "scholar": scholar,
+            "adoption": [],
+            "scholar_query_generation": query_generations,
+            "vocabulary": {"terms": [], "industry_terms": [], "query_families": {}, "mapping_confidence": 0, "rationale": ""},
+            "gap_candidate": None,
+        }
+        emit_event("finish", {"topic": topic, "label": result["label"], "scores": result["scores"]}, stage="finalization", source="system")
+        return result
+
+    def _build_response(self, *, topic: str, scope: Any, scholar: dict[str, Any], adoption: list[dict[str, Any]], scholar_queries: list[str], adoption_query_specs: list[tuple[str, str]], counter_query: str, vocabulary: Any, academic_records: list[Any], adoption_records: list[Any], research_clusters: list[Any], adoption_clusters: list[Any], links: list[ClusterLink], analyses: list[dict[str, Any]], top_candidate: dict[str, Any], counter_evidence: list[dict[str, Any]], deep_research: dict[str, Any], visualization: dict[str, Any], query_generations: list[dict[str, Any]]) -> dict[str, Any]:
+        candidate_by_id = {item["research_cluster_id"]: item for item in analyses}
+        candidate_by_id[top_candidate["research_cluster_id"]] = top_candidate
+        gap_candidates = list(candidate_by_id.values())
         return {
-            "requested": True,
-            "artifact_received": _has_event_type(visualization, "data-atlas"),
-            "events_received": len(visualization.get("events", [])),
+            "topic": topic,
+            "scope": scope.model_dump(),
+            "queries": {"scholar": scholar_queries, "adoption": [query for query, _ in adoption_query_specs], "adoption_families": [{"query": query, "family": family} for query, family in adoption_query_specs], "counter": counter_query},
+            "scores": top_candidate["scores"],
+            "label": top_candidate["label"],
+            "gap_types": top_candidate.get("gap_types", []),
+            "rationale": top_candidate.get("rationale", ""),
+            "connected_points": top_candidate.get("connected_points", []),
+            "gap_points": top_candidate.get("gap_points", []),
+            "potential_points": top_candidate.get("potential_points", []),
+            "evidence": scholar.get("results", []) + _flatten_results(adoption),
+            "counter_evidence": counter_evidence,
+            "deep_research": deep_research,
+            "visualization": visualization,
+            "academic_evidence": [record.model_dump() for record in academic_records],
+            "adoption_evidence": [record.model_dump() for record in adoption_records],
+            "research_clusters": [cluster.model_dump() for cluster in research_clusters],
+            "adoption_clusters": [cluster.model_dump() for cluster in adoption_clusters],
+            "links": [link.model_dump() for link in links],
+            "gap_candidates": gap_candidates,
+            "scholar": scholar,
+            "adoption": adoption,
+            "scholar_query_generation": query_generations,
+            "vocabulary": {**vocabulary.model_dump(), "industry_terms": vocabulary.terms},
+            "gap_candidate": top_candidate,
+        }
+
+    def _unconfirmed_result(self, topic: str, scope: Any) -> dict[str, Any]:
+        emit_event("note", {"text": "입력 분야를 확인하지 못해 추가 검색과 갭 생성을 중단합니다."}, stage="finalization", source="system")
+        return {
+            "topic": topic,
+            "scope": scope.model_dump(),
+            "queries": {"scholar": [], "adoption": [], "counter": ""},
+            "scores": {"evidence_maturity": 0, "adoption_evidence": 0, "coverage_confidence": 0, "gap_priority": 0},
+            "label": "unconfirmed_field",
+            "gap_types": [],
+            "rationale": "입력한 분야를 학술·산업 자료에서 확인하지 못했습니다.",
+            "connected_points": [],
+            "gap_points": [],
+            "potential_points": [],
+            "evidence": [],
+            "counter_evidence": [],
+            "deep_research": {"used": False, "timed_out": False, "status": "skipped", "reason": "분야 미확인"},
+            "visualization": {"requested": False, "artifact_received": False},
+            "academic_evidence": [],
+            "adoption_evidence": [],
+            "research_clusters": [],
+            "adoption_clusters": [],
+            "links": [],
+            "gap_candidates": [],
+            "scholar": {"results": []},
+            "adoption": [],
+            "vocabulary": {"terms": [], "industry_terms": [], "query_families": {}, "mapping_confidence": 0, "rationale": ""},
+            "gap_candidate": None,
         }
 
 
 async def run_pipeline(topic: str, **kwargs: Any) -> dict[str, Any]:
-    """Convenience entry point for the analyze route."""
     return await ResearchPipeline().run(topic, **kwargs)
+
+
+def _tag_item(item: dict[str, Any], family: str) -> dict[str, Any]:
+    tagged = dict(item)
+    tagged["query_family"] = tagged.get("query_family") or family
+    return tagged
+
+
+def _tag_items(items: list[dict[str, Any]], family: str) -> list[dict[str, Any]]:
+    return [_tag_item(item, family) for item in items]
 
 
 def _merge_search_results(responses: list[dict[str, Any]]) -> dict[str, Any]:
@@ -310,53 +690,100 @@ def _merge_search_results(responses: list[dict[str, Any]]) -> dict[str, Any]:
                 continue
             seen.add(key)
             results.append(item)
-    return {
-        "totalCount": sum(response.get("totalCount", len(response.get("results", []))) for response in responses),
-        "results": results,
-        "searches": responses,
-    }
+    return {"totalCount": sum(response.get("totalCount", len(response.get("results", []))) for response in responses), "results": results, "searches": responses}
 
 
 def _flatten_results(responses: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [item for response in responses for item in response.get("results", [])]
 
 
-def _extract_counter_evidence(result: dict[str, Any]) -> list[dict[str, Any]]:
-    evidence = []
+def _extract_counter_items(result: dict[str, Any]) -> list[dict[str, Any]]:
+    items = []
     for event in result.get("events", []):
-        event_type = event.get("type")
         data = event.get("data") or {}
-        if event_type == "data-search-references":
-            evidence.extend({"kind": "reference", **item} for item in data.get("references", []))
-        elif event_type == "data-search-chunks":
+        if event.get("type") == "data-search-references":
+            items.extend(_tag_items(data.get("references", []), "context"))
+        elif event.get("type") == "data-search-chunks":
             chunks = data.get("referenceChunks", data.get("reference_chunks", []))
-            evidence.extend({"kind": "chunk", **item} for item in chunks)
-    return evidence
+            items.extend(_tag_items(chunks, "context"))
+    deduped = []
+    seen = set()
+    for item in items:
+        key = item.get("url") or item.get("title") or repr(item)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(item)
+    return deduped
+
+
+def _extract_counter_evidence(result: dict[str, Any]) -> list[dict[str, Any]]:
+    return [{"kind": "reference", **item} for item in _extract_counter_items(result)]
 
 
 def _extract_report(result: dict[str, Any]) -> str:
-    return "".join(
-        event.get("delta", "")
-        for event in result.get("events", [])
-        if event.get("type") == "text-delta"
-    )
+    return "".join(event.get("delta", "") for event in result.get("events", []) if event.get("type") == "text-delta")
 
 
 def _has_event_type(result: dict[str, Any], event_type: str) -> bool:
     return any(event.get("type") == event_type for event in result.get("events", []))
 
 
-def _downgrade_for_counter_evidence(gap: dict[str, Any], counter_evidence: list[dict[str, Any]]) -> dict[str, Any]:
-    source_keys = {
-        item.get("source_url")
-        or item.get("url")
-        or item.get("source_title")
-        or item.get("title")
-        for item in counter_evidence
+def _cluster_summary(cluster: Any) -> dict[str, Any]:
+    return {
+        "cluster_id": cluster.cluster_id,
+        "technology": cluster.technology,
+        "use_case": cluster.use_case,
+        "context": cluster.context,
+        "expected_value": cluster.expected_value,
+        "subject": getattr(cluster, "subject", None),
+        "stage": getattr(cluster, "max_stage_attained", None),
+        "relation": getattr(cluster, "latest_relation", None),
     }
-    source_keys.discard(None)
-    if len(source_keys) < 2 or gap["gap_label"] not in {"gap_candidate", "weak_gap_candidate"}:
-        return gap
-    gap["gap_label"] = "weak_gap_candidate"
-    gap["rationale"] += " 반증 검색에서 산업 도입 근거가 확인되어 갭 확신도를 한 단계 낮췄습니다."
-    return gap
+
+
+def _query_family_count(query_families: dict[str, list[str]], query_specs: list[tuple[str, str]]) -> int:
+    if query_families:
+        return sum(bool(query_families.get(family)) for family in ("technology", "use_case", "context"))
+    return len({family for _, family in query_specs if family in {"technology", "use_case", "context"}})
+
+
+def _maturity_signals(cluster: ResearchCluster) -> dict[str, float]:
+    return {
+        "unique_papers": cluster.unique_paper_count,
+        "replications": cluster.replication_count,
+        "syntheses": cluster.synthesis_count,
+        "real_world": cluster.real_world_count,
+        "supports": cluster.supports_count,
+        "mixed": cluster.mixed_count,
+        "contradicts": cluster.contradicts_count,
+        "unclear": cluster.unclear_count,
+    }
+
+
+def _top_analysis(analyses: list[dict[str, Any]]) -> dict[str, Any]:
+    if not analyses:
+        return {
+            "research_cluster_id": "",
+            "scores": {"evidence_maturity": 0, "adoption_evidence": 0, "coverage_confidence": 0, "gap_priority": 0},
+            "label": "insufficient_evidence",
+            "gap_types": [],
+            "links": [],
+            "candidate_connections": [],
+            "confirmed_barriers": [],
+            "inferred_barriers": [],
+            "should_deep_research": False,
+            "deep_research_reasons": [],
+            "research_cluster": {},
+        }
+    return max(analyses, key=lambda item: item["scores"].get("gap_priority", 0))
+
+
+def _fallback_narrative(analysis: dict[str, Any]) -> dict[str, Any]:
+    scores = analysis.get("scores", {})
+    label = analysis.get("label", "insufficient_evidence")
+    return {
+        "rationale": f"연구 근거 성숙도 {scores.get('evidence_maturity', 0)}, 현실 도입 증거 {scores.get('adoption_evidence', 0)}, 검색 커버리지 {scores.get('coverage_confidence', 0)}로 {label}을 판정했습니다.",
+        "connected_points": [],
+        "gap_points": ["현재 검색 범위에서 직접 연결되는 산업 도입을 확인하지 못했습니다."] if "no_adoption_link" in analysis.get("gap_types", []) else [],
+        "potential_points": [],
+    }
