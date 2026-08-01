@@ -1,5 +1,6 @@
 """OpenAI Agents SDK steps used by the research pipeline."""
 
+import asyncio
 import json
 import os
 from typing import Any, Literal
@@ -14,9 +15,13 @@ SMALL_MODEL = os.environ.get("OPENAI_SMALL_MODEL", "gpt-4o-mini")
 LARGE_MODEL = os.environ.get("OPENAI_LARGE_MODEL", "gpt-4o")
 
 
+class AgentBudgetTimeout(TimeoutError):
+    """An intentional per-stage budget expiry, distinct from a provider error."""
+
+
 class ScopeDecision(BaseModel):
     status: Literal["broad", "focused", "niche", "unconfirmed"]
-    selected_topics: list[str] = Field(min_length=1, max_length=3)
+    selected_topics: list[str] = Field(default_factory=list, max_length=3)
     rationale: str
 
 
@@ -42,30 +47,97 @@ class ScholarQueryResult(BaseModel):
     rationale: str
 
 
+class QueryFamilies(BaseModel):
+    technology: list[str] = Field(default_factory=list, max_length=3)
+    use_case: list[str] = Field(default_factory=list, max_length=3)
+    context: list[str] = Field(default_factory=list, max_length=3)
+
+
 class VocabularyBridgeResult(BaseModel):
     terms: list[str] = Field(min_length=1, max_length=3)
+    query_families: QueryFamilies = Field(default_factory=QueryFamilies)
     mapping_confidence: float = Field(ge=0, le=1)
     rationale: str
 
 
-class GapCandidateResult(BaseModel):
-    evidence_maturity: int = Field(ge=0, le=100)
-    adoption_evidence: int = Field(ge=0, le=100)
-    coverage_confidence: int = Field(ge=0, le=100)
-    gap_label: Literal[
-        "gap_candidate",
-        "weak_gap_candidate",
-        "insufficient_evidence",
-        "unconfirmed_field",
-        "no_gap",
-        "over_adopted",
-    ]
-    should_deep_research: bool
+class AcademicExtraction(BaseModel):
+    source_index: int = Field(ge=0)
+    is_relevant: bool = True
+    technology_raw: str | None = None
+    technology_canonical: str | None = None
+    use_case_raw: str | None = None
+    use_case_canonical: str | None = None
+    context_raw: str | None = None
+    context_canonical: str | None = None
+    expected_value_raw: str | None = None
+    expected_value_canonical: str | None = None
+    canonical_claim: str = ""
+    evidence_span: str = ""
+    extraction_confidence: float = Field(ge=0, le=1)
+    is_replication: bool = False
+    is_synthesis: bool = False
+    is_real_world: bool = False
+    is_counter_evidence: bool = False
+    result_direction: Literal["supports", "mixed", "contradicts", "unclear"] = "unclear"
+    institutions: list[str] = Field(default_factory=list)
+
+
+class AcademicExtractionBatch(BaseModel):
+    records: list[AcademicExtraction] = Field(default_factory=list)
+
+
+class AdoptionExtraction(BaseModel):
+    source_index: int = Field(ge=0)
+    is_relevant: bool = True
+    subject_raw: str | None = None
+    subject_canonical: str | None = None
+    technology_raw: str | None = None
+    technology_canonical: str | None = None
+    use_case_raw: str | None = None
+    use_case_canonical: str | None = None
+    context_raw: str | None = None
+    context_canonical: str | None = None
+    expected_value_raw: str | None = None
+    expected_value_canonical: str | None = None
+    canonical_claim: str = ""
+    evidence_span: str = ""
+    extraction_confidence: float = Field(ge=0, le=1)
+    relation: Literal["uses", "does_not_use"] | None = None
+    usage_context: Literal[
+        "vendor_product_integration",
+        "vendor_internal_use",
+        "end_user_use",
+    ] | None = None
+    adoption_stage: Literal["pilot", "limited_deployment", "production", "unknown"] | None = None
+    deployment_unit: str | None = None
+    project_name: str | None = None
+    event_date: str | None = None
+    explicit_barriers: list[str] = Field(default_factory=list)
+
+
+class AdoptionExtractionBatch(BaseModel):
+    records: list[AdoptionExtraction] = Field(default_factory=list)
+
+
+class LinkDimensionResult(BaseModel):
+    research_cluster_id: str
+    adoption_cluster_id: str
+    technology_match: Literal[0.0, 0.5, 1.0]
+    use_case_match: Literal[0.0, 0.5, 1.0]
+    context_match: Literal[0.0, 0.5, 1.0]
+    expected_value_match: Literal[0.0, 0.5, 1.0]
+    matched_on: list[str] = Field(default_factory=list)
+    missing_on: list[str] = Field(default_factory=list)
+    explanation: str = ""
+    confidence: float = Field(ge=0, le=1)
+
+
+class LinkDimensionBatch(BaseModel):
+    links: list[LinkDimensionResult] = Field(default_factory=list)
+
+
+class GapNarrativeResult(BaseModel):
     rationale: str
-    # rationale 한 문단만으로는 사용자가 "무엇이 연결되고 무엇이 안 됐는지" 파악하기 어렵다는
-    # 피드백이 있어서, 갭 판정 근거를 세 갈래로 구조화해서 같이 받는다. 각 항목은 근거로 쓴
-    # 논문/산업 자료를 구체적으로 지칭하는 한두 문장이어야 하며, 비어 있어도 된다(해당 사항이
-    # 없을 수 있음).
     connected_points: list[str] = Field(default_factory=list, max_length=5)
     gap_points: list[str] = Field(default_factory=list, max_length=5)
     potential_points: list[str] = Field(default_factory=list, max_length=5)
@@ -73,6 +145,13 @@ class GapCandidateResult(BaseModel):
     # 어렵다는 피드백이 있었다. gap_points/potential_points를 근거로, 실제로 무엇을 만들면
     # 갭을 메울 수 있는지 실행 가능한 제안까지 한 단계 더 만든다.
     opportunity_suggestions: list[str] = Field(default_factory=list, max_length=3)
+
+
+class DeepResearchReviewResult(BaseModel):
+    confirmed_barriers: list[str] = Field(default_factory=list, max_length=5)
+    inferred_barriers: list[str] = Field(default_factory=list, max_length=5)
+    explicit_outcome_mismatch: bool = False
+    rationale: str = ""
 
 
 class ResearchAgents:
@@ -158,14 +237,45 @@ class ResearchAgents:
             instructions=(
                 "학술 주제를 산업 검색어로 바꾼다. 제품명, 오픈소스 프로젝트명, 표준 용어 등 "
                 "실제 산업에서 쓰이는 동의어를 최대 3개 제시한다. 확실하지 않은 직역은 "
-                "mapping_confidence를 낮춘다."
+                "mapping_confidence를 낮춘다. query_families에는 technology, use_case, context "
+                "세 검색 관점별 용어를 넣고, 확인되지 않은 용어는 만들지 않는다."
             ),
             output_type=VocabularyBridgeResult,
         )
-        self.gap_agent = Agent(
-            name="gap_candidate_generator",
+        self.academic_extractor = Agent(
+            name="academic_evidence_extractor",
+            model=small_model,
+            instructions=(
+                "입력된 학술 검색 결과마다 가장 관련 높은 적용 주장 하나만 추출한다. "
+                "원문에 없는 내용을 추론하지 않는다. technology, use_case, context, expected_value를 "
+                "가능한 범위에서 분리하고, evidence_span은 입력 title 또는 snippet에 실제 존재하는 "
+                "문자열이어야 한다. 핵심 필드가 불명확하면 is_relevant=false로 반환한다. "
+                "replication, synthesis, real-world 여부와 result_direction을 보수적으로 판정한다. "
+                "점수, label, gap type은 반환하지 않는다."
+            ),
+            output_type=AcademicExtractionBatch,
+        )
+        self.adoption_extractor = Agent(
+            name="adoption_evidence_extractor",
+            model=small_model,
+            instructions=(
+                "입력된 산업 검색 결과마다 실제 도입 증거를 추출한다. subject는 문서 작성자가 아니라 "
+                "기술을 실제로 사용하거나 사용하지 않는 조직이다. 구현·시험·운영이 직접 나타나면 "
+                "relation=uses, 거절·중단·제거·금지가 직접 나타나면 does_not_use, 계획·관심·호환·채용공고만 "
+                "있으면 is_relevant=false로 반환한다. uses일 때 usage_context와 adoption_stage를 보수적으로 "
+                "판정하고 deployed라는 단어만으로 production을 선택하지 않는다. evidence_span은 입력에 "
+                "실제로 존재해야 한다. 검색 결과 부재를 does_not_use로 바꾸지 않는다."
+            ),
+            output_type=AdoptionExtractionBatch,
+        )
+        self.cluster_link_agent = Agent(
+            name="cluster_link_analyzer",
             model=large_model,
             instructions=(
+                "연구 클러스터와 산업 클러스터를 technology, use_case, context, expected_value 네 "
+                "차원으로 비교한다. 각 값은 반드시 1.0(동일), 0.5(관련되나 조건이 다름), 0.0(다르거나 "
+                "판단 불가) 중 하나다. 최종 link_type, similarity, 점수, label은 반환하지 않는다. "
+                "근거가 충분하지 않으면 0.0과 낮은 confidence를 반환한다. "
                 "학술 검색 결과와 산업 검색 결과를 대조해 적용 갭 후보를 판정한다. "
                 "연구 성숙도, 산업 도입 증거, 검색 커버리지를 분리해서 평가하고, "
                 "근거가 부족하면 억지로 gap_candidate를 만들지 않는다. "
@@ -199,18 +309,40 @@ class ResearchAgents:
                 "gap_points가 비어 있어 메울 갭 자체가 없으면 opportunity_suggestions도 빈 "
                 "배열로 둔다 — 없는 기회를 억지로 만들어내지 않는다."
             ),
-            output_type=GapCandidateResult,
+            output_type=LinkDimensionBatch,
+        )
+        self.gap_narrator = Agent(
+            name="gap_narrator",
+            model=large_model,
+            instructions=(
+                "이미 코드로 계산된 점수·label·link type을 바꾸지 말고, 제공된 evidence id와 cluster 정보를 "
+                "바탕으로 짧고 사실적인 설명만 작성한다. connected_points는 실제 direct/partial 연결, "
+                "gap_points는 연결되지 않았거나 stage/context가 끊긴 부분, potential_points는 inferred 후보만 "
+                "기록한다. 근거가 없으면 빈 배열을 반환한다. 검색 부재를 현실 부재로 단정하지 않는다."
+            ),
+            output_type=GapNarrativeResult,
+        )
+        self.deep_research_reviewer = Agent(
+            name="deep_research_reviewer",
+            model=large_model,
+            instructions=(
+                "Deep Research 보고서에서 원문이 직접 확인하는 장벽과 결과 불일치만 추출한다. "
+                "confirmed_barriers와 에이전트의 해석에 불과한 inferred_barriers를 분리한다. "
+                "보고서가 직접 성과 불일치를 말하지 않으면 explicit_outcome_mismatch=false로 둔다."
+            ),
+            output_type=DeepResearchReviewResult,
         )
 
-    async def scope(self, topic: str) -> ScopeDecision:
+    async def scope(self, topic: str, *, timeout_s: float | None = None) -> ScopeDecision:
         return await self._run(
             self.scope_agent,
             topic,
             stage="scope_calibrator",
             purpose="scope decision",
+            timeout_s=timeout_s,
         )
 
-    async def preflight(self, topic: str) -> InputPreflightResult:
+    async def preflight(self, topic: str, *, timeout_s: float | None = None) -> InputPreflightResult:
         prompt = json.dumps(
             {
                 "topic": topic,
@@ -227,9 +359,10 @@ class ResearchAgents:
             prompt,
             stage="input_preflight",
             purpose="input validity and recommendation generation",
+            timeout_s=timeout_s,
         )
 
-    async def scholar_query(self, topic: str, scope: ScopeDecision) -> ScholarQueryResult:
+    async def scholar_query(self, topic: str, scope: ScopeDecision, *, timeout_s: float | None = None) -> ScholarQueryResult:
         prompt = json.dumps(
             {
                 "topic": topic,
@@ -243,9 +376,10 @@ class ResearchAgents:
             prompt,
             stage="scholar_scout",
             purpose="scholar query generation",
+            timeout_s=timeout_s,
         )
 
-    async def vocabulary_bridge(self, topic: str, scholar: dict[str, Any]) -> VocabularyBridgeResult:
+    async def vocabulary_bridge(self, topic: str, scholar: dict[str, Any], *, timeout_s: float | None = None) -> VocabularyBridgeResult:
         prompt = json.dumps(
             {"topic": topic, "scholar_evidence": _evidence_preview(scholar)},
             ensure_ascii=False,
@@ -255,30 +389,76 @@ class ResearchAgents:
             prompt,
             stage="vocabulary_bridge",
             purpose="industrial query generation",
+            timeout_s=timeout_s,
         )
 
-    async def gap_candidate(
-        self,
-        topic: str,
-        scholar: dict[str, Any],
-        adoption: list[dict[str, Any]],
-    ) -> GapCandidateResult:
+    async def academic_extract(self, items: list[dict[str, Any]], *, timeout_s: float | None = None) -> AcademicExtractionBatch:
         prompt = json.dumps(
-            {
-                "topic": topic,
-                "scholar_evidence": _evidence_preview(scholar),
-                "adoption_evidence": [_evidence_preview(item) for item in adoption],
-            },
+            {"results": _compact_items(items), "task": "Extract one structured academic evidence record per result."},
             ensure_ascii=False,
         )
         return await self._run(
-            self.gap_agent,
+            self.academic_extractor,
             prompt,
-            stage="gap_candidate_generator",
-            purpose="gap judgement",
+            stage="academic_extraction",
+            purpose="academic evidence extraction",
+            timeout_s=timeout_s,
         )
 
-    async def _run(self, agent: Agent, prompt: str, *, stage: str, purpose: str) -> Any:
+    async def adoption_extract(self, items: list[dict[str, Any]], *, timeout_s: float | None = None) -> AdoptionExtractionBatch:
+        prompt = json.dumps(
+            {"results": _compact_items(items), "task": "Extract one structured adoption evidence record per result."},
+            ensure_ascii=False,
+        )
+        return await self._run(
+            self.adoption_extractor,
+            prompt,
+            stage="adoption_extraction",
+            purpose="adoption evidence extraction",
+            timeout_s=timeout_s,
+        )
+
+    async def cluster_link(self, pairs: list[dict[str, Any]], *, timeout_s: float | None = None) -> LinkDimensionBatch:
+        prompt = json.dumps(
+            {"pairs": pairs, "task": "Compare each research/adoption cluster pair across four dimensions."},
+            ensure_ascii=False,
+        )
+        return await self._run(
+            self.cluster_link_agent,
+            prompt,
+            stage="cluster_linkage",
+            purpose="research-to-reality dimension matching",
+            timeout_s=timeout_s,
+        )
+
+    async def gap_narrative(self, analysis: dict[str, Any], *, timeout_s: float | None = None) -> GapNarrativeResult:
+        prompt = json.dumps(analysis, ensure_ascii=False)
+        return await self._run(
+            self.gap_narrator,
+            prompt,
+            stage="finalization",
+            purpose="structured gap explanation",
+            timeout_s=timeout_s,
+        )
+
+    async def review_deep_research(self, report: str, *, timeout_s: float | None = None) -> DeepResearchReviewResult:
+        return await self._run(
+            self.deep_research_reviewer,
+            report,
+            stage="conditional_deep_research",
+            purpose="deep research evidence review",
+            timeout_s=timeout_s,
+        )
+
+    async def _run(
+        self,
+        agent: Agent,
+        prompt: str,
+        *,
+        stage: str,
+        purpose: str,
+        timeout_s: float | None = None,
+    ) -> Any:
         call_event = emit_event(
             "tool_call",
             {"name": agent.name, "purpose": purpose, "model": agent.model, "input": prompt},
@@ -286,9 +466,35 @@ class ResearchAgents:
             source="openai",
         )
         try:
-            result = await Runner.run(agent, prompt)
+            run = Runner.run(agent, prompt)
+            result = await asyncio.wait_for(run, timeout=timeout_s) if timeout_s is not None else await run
             output = result.final_output
             serialized = output.model_dump() if isinstance(output, BaseModel) else output
+        except (asyncio.TimeoutError, TimeoutError) as exc:
+            emit_event(
+                "note",
+                {
+                    "name": agent.name,
+                    "call_id": call_event["id"],
+                    "reason": "budget_timeout",
+                    "timeout_kind": "budget",
+                    "timeout_s": timeout_s,
+                },
+                stage=stage,
+                source="openai",
+            )
+            emit_event(
+                "tool_result",
+                {
+                    "name": agent.name,
+                    "call_id": call_event["id"],
+                    "timed_out": True,
+                    "timeout_kind": "budget",
+                },
+                stage=stage,
+                source="openai",
+            )
+            raise AgentBudgetTimeout(f"{agent.name} exceeded its {timeout_s}s budget") from exc
         except Exception as exc:
             emit_event(
                 "error",
@@ -321,3 +527,20 @@ def _evidence_preview(payload: dict[str, Any]) -> dict[str, Any]:
                 }
             )
     return {"totalCount": payload.get("totalCount", len(results)), "results": preview}
+
+
+def _compact_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    compact = []
+    for index, item in enumerate(items):
+        compact.append(
+            {
+                "source_index": index,
+                "title": item.get("title") or "",
+                "snippet": item.get("snippet") or item.get("description") or "",
+                "url": item.get("url") or item.get("link") or "",
+                "citationCount": item.get("citationCount"),
+                "published_at": item.get("published_at") or item.get("publishedAt"),
+                "query_family": item.get("query_family"),
+            }
+        )
+    return compact

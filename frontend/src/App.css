@@ -64,6 +64,65 @@
   padding: 88px 24px 72px;
 }
 
+.fast-mode-toggle {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.15px;
+  backdrop-filter: blur(10px);
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.fast-mode-toggle:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-muted);
+  transform: translateY(-1px);
+}
+
+.fast-mode-toggle.is-on {
+  color: #fff;
+  background: var(--text);
+  border-color: var(--text);
+}
+
+.fast-mode-toggle:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.fast-mode-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.35;
+}
+
+.fast-mode-toggle.is-on .fast-mode-dot {
+  background: #8ee6a8;
+  opacity: 1;
+  box-shadow: 0 0 0 3px rgb(142 230 168 / 18%);
+}
+
+.fast-mode-state {
+  min-width: 24px;
+  color: inherit;
+  font-size: 9px;
+  letter-spacing: 0.6px;
+  opacity: 0.65;
+}
+
 .user-view-intro {
   text-align: center;
   margin-bottom: 52px;
@@ -133,11 +192,15 @@
   gap: 10px;
   margin-top: -14px;
   margin-bottom: 36px;
-  /* 이전 결과를 그대로 보여준 채로 새로 타이핑할 때, 지금 입력 중인 추천이랑 아래
-     예전 결과가 구분 안 되고 붙어 보일 수 있어서 아래에 옅은 구분선을 하나 둔다. */
+  animation: rise-in 0.2s ease both;
+}
+
+/* 이전 결과를 그대로 보여준 채로 새로 타이핑할 때만, 지금 입력 중인 추천이랑 아래
+   예전 결과가 구분 안 되고 붙어 보일 수 있어서 구분선을 둔다. 결과가 아직 없는
+   첫 검색 상태에서는 아래에 아무것도 없으므로 선도 필요 없다. */
+.user-view-live-suggestions.has-stale-result {
   padding-bottom: 28px;
   border-bottom: 1px solid var(--border);
-  animation: rise-in 0.2s ease both;
 }
 
 .live-suggestions-label {
@@ -321,6 +384,20 @@
   margin: 0 0 14px;
 }
 
+/* 시간 예산 안에서 잠정 판정된 경우("partial") 안내 — topic-note/corrected-note와는
+   별개 조건(analysis_status)이라 둘 다 살려둠. border-radius를 안 줘서 밤티 이슈는 없음. */
+.user-view-partial-note {
+  width: 100%;
+  margin: 0 0 18px;
+  padding: 10px 12px;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border-left: 3px solid var(--accent);
+  font-size: 13px;
+  line-height: 1.55;
+  text-align: left;
+}
+
 .corrected-note-term {
   color: var(--text);
   font-style: italic;
@@ -385,6 +462,93 @@
   font-weight: 800;
   letter-spacing: -0.4px;
   color: var(--text);
+}
+
+.gap-type-summary,
+.score-breakdown {
+  width: 100%;
+  margin: 0 0 18px;
+}
+
+.gap-type-summary-label,
+.score-breakdown-label {
+  display: block;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 7px;
+}
+
+.gap-type-list,
+.score-breakdown-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gap-type-item,
+.score-breakdown-item {
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.structured-links {
+  width: 100%;
+  margin-bottom: 24px;
+}
+
+.structured-link-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.structured-link {
+  display: grid;
+  grid-template-columns: max-content max-content 1fr;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 12.5px;
+}
+
+.structured-link-direct {
+  border-left-color: var(--green);
+}
+
+.structured-link-partial {
+  border-left-color: var(--accent);
+}
+
+.structured-link-blocked {
+  border-left-color: var(--red);
+}
+
+.structured-link-type {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.structured-link-score {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.structured-link-explanation {
+  color: var(--text-muted);
+  line-height: 1.45;
 }
 
 /* 무채색 베이스 안에서 점수 크기에 따라 명암 강도로 신호를 준다 — 낮을수록 옅게,
@@ -1203,4 +1367,21 @@ main {
   word-break: break-word;
   font-family: var(--mono);
   font-size: 12.5px;
+}
+
+@media (max-width: 640px) {
+  .fast-mode-toggle {
+    top: 12px;
+    right: 12px;
+    padding: 7px 9px;
+  }
+
+  .user-view-scores {
+    grid-template-columns: 1fr;
+  }
+
+  .structured-link {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
 }
