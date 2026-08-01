@@ -5,7 +5,7 @@ Bridge Agent. 학술 근거와 산업 도입 증거 사이의 불일치를 찾�
 세부 기획은 `docs/` 참고. 실전 파이프라인 전환 순서는 `docs/04_실전_파이프라인_전환계획.md` 참고. 빌드 원칙과 코드 스타일은 `AGENTS.md` 참고.
 
 ## 구조
-
+ㅍㅊㅍㅊㅍ
 ```
 backend/    FastAPI. 이벤트 브로드캐스트 + SSE + API 테스트 프록시.
 frontend/   React(Vite). Raw API Stream 화면 + API 테스트 화면.
