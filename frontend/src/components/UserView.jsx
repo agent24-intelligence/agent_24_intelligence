@@ -112,6 +112,16 @@ function SparkIcon() {
   )
 }
 
+// 근거 목록 페이지네이션 화살표 — 로고 반쪽 이미지를 화살표로 썼더니 작은 크기에서
+// 잘린 도형처럼 보여서(방향성이 안 읽힘), 다른 아이콘들과 같은 선 스타일의 셰브런으로 교체.
+function ChevronIcon({ direction = 'left' }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points={direction === 'left' ? '15 6 9 12 15 18' : '9 6 15 12 9 18'} />
+    </svg>
+  )
+}
+
 // 중단 버튼 아이콘 — X 대신 모서리가 둥근 빈 사각형(정지 버튼의 부드러운 버전)으로.
 function StopIcon() {
   return (
@@ -413,10 +423,12 @@ function StructuredLinks({ links }) {
 }
 
 function AdoptionUseEvidence({ records }) {
-  const visible = Array.isArray(records) ? records.slice(0, 5) : []
+  const all = Array.isArray(records) ? records : []
+  const visible = all.slice(0, 5)
+  const hiddenCount = all.length - visible.length
   return (
     <div className={`adoption-use-evidence ${visible.length === 0 ? 'adoption-use-evidence-empty' : ''}`}>
-      <h3 className="connection-group-title">명시적으로 확인된 사용 근거</h3>
+      <h3 className="connection-group-title adoption-use-title">명시적으로 확인된 사용 근거</h3>
       {visible.length === 0 ? (
         <p className="adoption-use-empty-text">
           사용 주체와 적용 맥락이 함께 확인된 산업 도입 근거는 없습니다.
@@ -451,6 +463,7 @@ function AdoptionUseEvidence({ records }) {
           })}
         </ul>
       )}
+      {hiddenCount > 0 && <p className="adoption-use-more-note">이 외 {hiddenCount}개 더 확인됨</p>}
     </div>
   )
 }
@@ -475,7 +488,7 @@ function EvidenceGroup({ title, items, showCitation, page, onPageChange }) {
       {totalPages > 1 && (
         <div className="evidence-pager">
           <button type="button" disabled={page === 0} onClick={() => onPageChange(page - 1)} aria-label="이전 페이지">
-            <img src="/logo-filled-half-left.png" alt="" className="pager-logo-icon" />
+            <ChevronIcon direction="left" />
           </button>
           <span className="evidence-pager-status">
             {page + 1} / {totalPages}
@@ -486,7 +499,7 @@ function EvidenceGroup({ title, items, showCitation, page, onPageChange }) {
             onClick={() => onPageChange(page + 1)}
             aria-label="다음 페이지"
           >
-            <img src="/logo-filled-half-right.png" alt="" className="pager-logo-icon" />
+            <ChevronIcon direction="right" />
           </button>
         </div>
       )}
@@ -935,7 +948,11 @@ export default function UserView() {
           </div>
 
           {showFinalSynthesis && (
-            <div className={`final-synthesis final-synthesis-${finalSynthesisStatus || 'streaming'}`}>
+            <div
+              className={`final-synthesis final-synthesis-${finalSynthesisStatus || 'streaming'}${
+                LABEL_COLOR_FAMILY[result.label] ? ` tone-${LABEL_COLOR_FAMILY[result.label]}` : ''
+              }`}
+            >
               <h3 className="final-synthesis-title">최종 분석</h3>
               <div className="final-synthesis-body">
                 <FinalSynthesisText text={finalSynthesisText} streaming={finalSynthesisStatus === 'streaming'} />
@@ -943,7 +960,23 @@ export default function UserView() {
             </div>
           )}
 
-          {/* 판정 설명(라벨/점수/rationale)과 그 아래 보조 설명 묶음을 구분선으로 나눈다 —
+          {/* 제일 실행 가능한 정보(다음에 뭘 검증해볼지)를 판정/요약 바로 아래, 상세 근거보다
+              먼저 보여준다 — "핵심을 먼저, 근거는 원하는 사람만 더 파게" 순서로 옮김. */}
+          {result.opportunity_suggestions?.length > 0 && (
+            <div className="user-view-opportunities">
+              <h3 className="opportunities-title">
+                <SparkIcon />
+                이런 기회가 있습니다
+              </h3>
+              <ul className="opportunities-list">
+                {result.opportunity_suggestions.map((text, i) => (
+                  <li key={i}>{text}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* 판정 설명(라벨/점수/rationale/기회)과 그 아래 보조 설명 묶음을 구분선으로 나눈다 —
               전부 텍스트/카드가 이어 붙어있으면 어디까지가 "판정"이고 어디부터가
               "부가 설명"인지 눈으로 구분이 잘 안 됐다. */}
           {(result.vocabulary?.rationale ||
@@ -951,8 +984,7 @@ export default function UserView() {
             result.gap_points?.length > 0 ||
             result.potential_points?.length > 0 ||
             confirmedBarriers.length > 0 ||
-            inferredBarriers.length > 0 ||
-            result.opportunity_suggestions?.length > 0) && <div className="section-divider" />}
+            inferredBarriers.length > 0) && <div className="section-divider" />}
 
           {result.vocabulary?.rationale && (
             <div className="user-view-bridge">
@@ -1001,22 +1033,6 @@ export default function UserView() {
           )}
 
           <AdoptionUseEvidence records={adoptionEvidenceRecords(result)} />
-
-          {/* opportunity_suggestions: 백엔드 finalization에서 계산된 갭 포인트를 바탕으로
-              실행 가능한 제안이 있을 때만 채워진다. */}
-          {result.opportunity_suggestions?.length > 0 && (
-            <div className="user-view-opportunities">
-              <h3 className="opportunities-title">
-                <SparkIcon />
-                이런 기회가 있습니다
-              </h3>
-              <ul className="opportunities-list">
-                {result.opportunity_suggestions.map((text, i) => (
-                  <li key={i}>{text}</li>
-                ))}
-              </ul>
-            </div>
-          )}
 
           {(() => {
             const scholar = scholarItems(result)
