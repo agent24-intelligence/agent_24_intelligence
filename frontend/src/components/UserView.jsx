@@ -884,10 +884,14 @@ export default function UserView() {
             </div>
           </div>
 
-          {/* 예전엔 이 자리에 클라이언트에서 다시 조합한 요약 문장(judgmentSummary)이
-              따로 떠서 아래 rationale/연계 카드와 사실상 같은 내용을 다른 말로 두 번
-              반복했다 — 백엔드가 실제로 근거로 쓴 rationale 하나만 그대로 보여준다. */}
-          {result.rationale && <p className="judgment-summary">{result.rationale}</p>}
+          {showFinalSynthesis && (
+            <div className={`final-synthesis final-synthesis-${finalSynthesisStatus || 'streaming'}`}>
+              <h3 className="final-synthesis-title">최종 분석</h3>
+              <div className="final-synthesis-body">
+                <FinalSynthesisText text={finalSynthesisText} streaming={finalSynthesisStatus === 'streaming'} />
+              </div>
+            </div>
+          )}
 
           {/* 판정 설명(라벨/점수/rationale)과 그 아래 보조 설명 묶음을 구분선으로 나눈다 —
               전부 텍스트/카드가 이어 붙어있으면 어디까지가 "판정"이고 어디부터가
@@ -964,15 +968,6 @@ export default function UserView() {
             </div>
           )}
 
-          {showFinalSynthesis && (
-            <div className={`final-synthesis final-synthesis-${finalSynthesisStatus || 'streaming'}`}>
-              <h3 className="final-synthesis-title">최종 분석</h3>
-              <div className="final-synthesis-body">
-                <FinalSynthesisText text={finalSynthesisText} streaming={finalSynthesisStatus === 'streaming'} />
-              </div>
-            </div>
-          )}
-
           {(() => {
             const scholar = scholarItems(result)
             const adoption = adoptionItems(result)
@@ -1007,12 +1002,14 @@ export default function UserView() {
 
           {/* 계산 근거 — 일반 사용자는 안 봐도 되는 검증용 디테일(점수 계산식, 링크 단위
               유사도 %)이라 기본은 접어두고, 필요한 사람만 펼쳐 보게 한다. */}
-          {(result.gap_candidate?.score_breakdown ||
+          {(result.rationale ||
+            result.gap_candidate?.score_breakdown ||
             (result.gap_candidate?.links || result.links)?.length > 0) && (
             <details className="score-breakdown">
               <summary className="score-breakdown-toggle">
                 <span className="score-breakdown-label">계산 근거 자세히 보기</span>
               </summary>
+              {result.rationale && <p className="score-breakdown-rationale">{result.rationale}</p>}
               {result.gap_candidate?.score_breakdown && (
                 <div className="score-breakdown-list">
                   {Object.entries(result.gap_candidate.score_breakdown).map(([name, breakdown]) => (
