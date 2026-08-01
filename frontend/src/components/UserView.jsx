@@ -16,13 +16,14 @@ const STAGE_LABEL = {
 }
 
 // 사용자에게 그대로 보여주는 판정 문구 — 학술 라벨 대신 결과를 바로 이해할 수 있는 말투로.
+// 소개 문구("~분석합니다")와 톤을 맞춰서 정중체(합니다체)로 통일.
 const LABEL_TEXT = {
-  gap_candidate: '아직 현장엔 없어요',
-  weak_gap_candidate: '조금 뒤처져 있어요',
-  insufficient_evidence: '아직 판단하기 일러요',
-  unconfirmed_field: '분야를 다시 확인해주세요',
-  no_gap: '이미 잘 쓰이고 있어요',
-  over_adopted: '연구보다 앞서가고 있어요',
+  gap_candidate: '아직 산업 현장에 적용되지 않았습니다',
+  weak_gap_candidate: '산업 적용이 다소 늦은 편입니다',
+  insufficient_evidence: '판단할 근거가 아직 부족합니다',
+  unconfirmed_field: '입력한 분야를 다시 확인해주세요',
+  no_gap: '이미 산업에 도입되어 있습니다',
+  over_adopted: '연구보다 산업 적용이 앞서 있습니다',
 }
 
 // 결과 라벨을 의미에 맞는 톤으로 구분한다 (앰버 = 갭 시그널, 그린 = 해소/정리됨,
@@ -130,8 +131,8 @@ export default function UserView() {
       } catch {
         throw new Error(
           res.ok
-            ? '서버 응답을 이해하지 못했어요. 잠시 후 다시 시도해주세요.'
-            : `서버에 문제가 생겼어요 (${res.status}). 잠시 후 다시 시도해주세요.`,
+            ? '서버 응답을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.'
+            : `서버 오류가 발생했습니다 (${res.status}). 잠시 후 다시 시도해주세요.`,
         )
       }
 
@@ -141,7 +142,7 @@ export default function UserView() {
         const detail = Array.isArray(data?.detail)
           ? data.detail.map((d) => d.msg || JSON.stringify(d)).join(', ')
           : data?.detail || data?.message
-        throw new Error(detail || `요청이 실패했어요 (${res.status}). 잠시 후 다시 시도해주세요.`)
+        throw new Error(detail || `요청이 실패했습니다 (${res.status}). 잠시 후 다시 시도해주세요.`)
       }
 
       setResult(data)
@@ -152,7 +153,7 @@ export default function UserView() {
         setStage(null)
         return
       }
-      setErrorMsg(err instanceof Error ? err.message : '알 수 없는 오류가 발생했어요. 잠시 후 다시 시도해주세요.')
+      setErrorMsg(err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다. 잠시 후 다시 시도해주세요.')
       setStatus('error')
     } finally {
       abortRef.current = null
@@ -227,6 +228,10 @@ export default function UserView() {
 
       {status === 'done' && result && (
         <div className="user-view-result">
+          <div className={`user-view-label ${LABEL_TONE[result.label] || 'label-neutral'}`}>
+            {LABEL_TEXT[result.label] || result.label}
+          </div>
+
           <div className="user-view-scores">
             <div className="score-card">
               <span className="score-label">연구는 얼마나 진행됐나</span>
@@ -242,15 +247,25 @@ export default function UserView() {
             </div>
           </div>
 
-          <div className={`user-view-label ${LABEL_TONE[result.label] || 'label-neutral'}`}>
-            {LABEL_TEXT[result.label] || result.label}
-          </div>
           {result.rationale && <p className="user-view-rationale">{result.rationale}</p>}
 
           {artifact?.html && (
             <>
               <div className="gap-map-caption">OpenAI 판정 결과를 Liner Visualization으로 최종 표현</div>
-              <iframe title="gap-map" className="gap-map-frame" srcDoc={artifact.html} sandbox="allow-scripts" />
+              {/* 안쪽에 별도 스크롤바가 생기지 않도록, 로드되면 내용 높이만큼 iframe 자체 높이를 늘려서
+                  스크롤이 페이지 하나로만 일어나게 한다. */}
+              <iframe
+                title="gap-map"
+                className="gap-map-frame"
+                srcDoc={artifact.html}
+                sandbox="allow-scripts allow-same-origin"
+                onLoad={(e) => {
+                  const doc = e.currentTarget.contentDocument
+                  if (doc?.documentElement) {
+                    e.currentTarget.style.height = `${doc.documentElement.scrollHeight}px`
+                  }
+                }}
+              />
             </>
           )}
         </div>
