@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import os
+import asyncio
 from typing import Any
 
 from events import emit_event
@@ -27,17 +27,32 @@ from liner_client import LinerClient
 from openai_agents import (
     AdoptionExtractionBatch,
     AcademicExtractionBatch,
+    AgentBudgetTimeout,
+    QueryFamilies,
     ResearchAgents,
+    ScopeDecision,
+    VocabularyBridgeResult,
 )
+from runtime_config import AnalysisDeadline, RuntimeConfig
 from scoring_config import MAX_ADOPTION_CLUSTERS, MAX_LINK_CANDIDATES_PER_RESEARCH, MAX_RESEARCH_CLUSTERS
 
 
 class ResearchPipeline:
     """Run search, structure, linkage, scoring, verification, and visualization."""
 
-    def __init__(self, liner: LinerClient | None = None, agents: ResearchAgents | None = None):
+    def __init__(
+        self,
+        liner: LinerClient | None = None,
+        agents: ResearchAgents | None = None,
+        *,
+        deadline: AnalysisDeadline | None = None,
+        runtime: RuntimeConfig | None = None,
+    ):
         self.liner = liner or LinerClient()
         self.agents = agents or ResearchAgents()
+        self.runtime = runtime or RuntimeConfig()
+        self.deadline = deadline
+        self.last_partial_result: dict[str, Any] | None = None
 
     async def run(
         self,
@@ -47,6 +62,10 @@ class ResearchPipeline:
         adoption_queries: list[str] | None = None,
         max_results: int = 10,
     ) -> dict[str, Any]:
+        self.deadline = self.deadline or AnalysisDeadline(self.runtime.total_timeout_s)
+        self.last_partial_result = None
+        max_results = min(max_results, self.runtime.max_search_results)
+
         scope = await self._calibrate_scope(topic)
         if scope.status == "unconfirmed" or not scope.selected_topics:
             return self._unconfirmed_result(topic, scope)
@@ -55,7 +74,9 @@ class ResearchPipeline:
         scholar = await self._run_scholar_scout(scholar_queries, max_results=max_results)
         scholar_items = _tag_items(scholar.get("results", []), "academic")
 
-        academic_records, academic_extraction_meta = await self._extract_academic_records(scholar_items)
+        academic_task = asyncio.create_task(self._extract_academic_records(scholar_items))
+        vocabulary_task = asyncio.create_task(self._run_vocabulary_bridge(topic, scholar))
+        academic_records, academic_extraction_meta = await academic_task
         academic_records = deduplicate_records(academic_records)
         research_clusters = build_research_clusters(academic_records, limit=MAX_RESEARCH_CLUSTERS)
         emit_event(
@@ -70,6 +91,8 @@ class ResearchPipeline:
         )
 
         if not research_clusters:
+            if not vocabulary_task.done():
+                vocabulary_task.cancel()
             return self._insufficient_result(
                 topic=topic,
                 scope=scope,
@@ -79,7 +102,7 @@ class ResearchPipeline:
                 academic_records=academic_records,
             )
 
-        vocabulary = await self._run_vocabulary_bridge(topic, scholar)
+        vocabulary = await vocabulary_task
         query_specs = self._build_adoption_query_specs(vocabulary, adoption_queries)
         adoption = await self._run_adoption_scout(query_specs, max_results=max_results)
         adoption_items = _tag_items(_flatten_results(adoption), "adoption")
@@ -111,6 +134,25 @@ class ResearchPipeline:
         )
         analyses = self._evaluate_all(research_clusters, adoption_clusters, links, coverage, scope.status == "unconfirmed")
         top_candidate = _top_analysis(analyses)
+        self._remember_partial(
+            topic=topic,
+            scope=scope,
+            scholar=scholar,
+            adoption=adoption,
+            scholar_queries=scholar_queries,
+            adoption_query_specs=query_specs,
+            counter_query="",
+            vocabulary=vocabulary,
+            academic_records=academic_records,
+            adoption_records=adoption_records,
+            research_clusters=research_clusters,
+            adoption_clusters=adoption_clusters,
+            links=links,
+            analyses=analyses,
+            top_candidate=top_candidate,
+            counter_evidence=[],
+            reason="학술·산업 근거를 확보하고 1차 점수까지 계산했습니다.",
+        )
 
         counter_query = self._counter_query(topic, top_candidate)
         counter_result = await self._run_adversarial_verifier(counter_query)
@@ -120,7 +162,12 @@ class ResearchPipeline:
         if counter_records:
             adoption_records = deduplicate_records([*adoption_records, *counter_records])
             adoption_clusters = build_adoption_clusters(adoption_records, limit=MAX_ADOPTION_CLUSTERS)
-            links = await self._run_cluster_linkage(research_clusters, adoption_clusters)
+            refreshed = await self._run_cluster_linkage(
+                [cluster for cluster in research_clusters if cluster.cluster_id == top_candidate.get("research_cluster_id")],
+                adoption_clusters,
+                timeout_stage="counter_relink",
+            )
+            links = [link for link in links if link.research_cluster_id != top_candidate.get("research_cluster_id")] + refreshed
 
         coverage = self._coverage(
             academic_records=academic_records,
@@ -139,6 +186,25 @@ class ResearchPipeline:
         )
         analyses = self._evaluate_all(research_clusters, adoption_clusters, links, coverage, False)
         top_candidate = _top_analysis(analyses)
+        self._remember_partial(
+            topic=topic,
+            scope=scope,
+            scholar=scholar,
+            adoption=adoption,
+            scholar_queries=scholar_queries,
+            adoption_query_specs=query_specs,
+            counter_query=counter_query,
+            vocabulary=vocabulary,
+            academic_records=academic_records,
+            adoption_records=adoption_records,
+            research_clusters=research_clusters,
+            adoption_clusters=adoption_clusters,
+            links=links,
+            analyses=analyses,
+            top_candidate=top_candidate,
+            counter_evidence=counter_evidence,
+            reason="반증 검색까지 반영한 잠정 판정입니다.",
+        )
 
         deep_target_id = top_candidate.get("research_cluster_id")
         deep_research = await self._run_conditional_deep_research(topic, top_candidate, counter_evidence)
@@ -149,7 +215,12 @@ class ResearchPipeline:
             adoption_records = deduplicate_records([*adoption_records, *deep_records])
             adoption_items = [*adoption_items, *deep_items]
             adoption_clusters = build_adoption_clusters(adoption_records, limit=MAX_ADOPTION_CLUSTERS)
-            links = await self._run_cluster_linkage(research_clusters, adoption_clusters)
+            refreshed = await self._run_cluster_linkage(
+                [cluster for cluster in research_clusters if cluster.cluster_id == deep_target_id],
+                adoption_clusters,
+                timeout_stage="counter_relink",
+            )
+            links = [link for link in links if link.research_cluster_id != deep_target_id] + refreshed
             coverage = self._coverage(
                 academic_records=academic_records,
                 adoption_records=adoption_records,
@@ -174,10 +245,31 @@ class ResearchPipeline:
         top_candidate["confirmed_barriers"] = list(dict.fromkeys(deep_review.get("confirmed_barriers", []) + top_candidate.get("confirmed_barriers", [])))
         top_candidate["inferred_barriers"] = list(dict.fromkeys(deep_review.get("inferred_barriers", []) + top_candidate.get("inferred_barriers", [])))
 
-        narrative = await self._run_gap_narrative(top_candidate, research_clusters, adoption_clusters)
+        narrative_task = asyncio.create_task(self._run_gap_narrative(top_candidate, research_clusters, adoption_clusters))
+        visualization_task = asyncio.create_task(self._run_gap_map(topic, top_candidate, max_results=max_results))
+        narrative, visualization = await asyncio.gather(narrative_task, visualization_task)
         top_candidate.update(narrative)
-
-        visualization = await self._run_gap_map(topic, top_candidate, max_results=max_results)
+        self._remember_partial(
+            topic=topic,
+            scope=scope,
+            scholar=scholar,
+            adoption=adoption,
+            scholar_queries=scholar_queries,
+            adoption_query_specs=query_specs,
+            counter_query=counter_query,
+            vocabulary=vocabulary,
+            academic_records=academic_records,
+            adoption_records=adoption_records,
+            research_clusters=research_clusters,
+            adoption_clusters=adoption_clusters,
+            links=links,
+            analyses=analyses,
+            top_candidate=top_candidate,
+            counter_evidence=counter_evidence,
+            deep_research=deep_research,
+            visualization=visualization,
+            reason="시간 예산 안에서 확보된 근거로 잠정 판정했습니다.",
+        )
         result = self._build_response(
             topic=topic,
             scope=scope,
@@ -199,6 +291,7 @@ class ResearchPipeline:
             visualization=visualization,
             query_generations=query_generations,
         )
+        result["analysis_status"] = "complete"
         emit_event(
             "finish",
             {
@@ -216,7 +309,11 @@ class ResearchPipeline:
 
     async def _calibrate_scope(self, topic: str):
         emit_event("note", {"text": "Scope Calibrator: 입력 주제의 범위를 판정합니다."}, stage="scope_calibrator", source="system")
-        return await self.agents.scope(topic)
+        try:
+            return await self.agents.scope(topic, timeout_s=self._stage_timeout("scope"))
+        except AgentBudgetTimeout:
+            emit_event("note", {"text": "Scope Calibrator 시간 예산이 끝나 원문 주제를 대표 범위로 사용합니다."}, stage="scope_calibrator", source="system")
+            return ScopeDecision(status="focused", selected_topics=[topic], rationale="시간 예산 내 자동 범위 보정")
 
     async def _build_scholar_queries(self, topic: str, scope: Any, scholar_query: str | None) -> tuple[list[str], list[dict[str, Any]]]:
         if scholar_query:
@@ -228,9 +325,21 @@ class ResearchPipeline:
             source="system",
         )
         generated = []
-        for selected_topic in scope.selected_topics:
-            query_result = await self.agents.scholar_query(selected_topic, scope)
-            generated.append(query_result.model_dump())
+        tasks = [
+            asyncio.create_task(
+                self.agents.scholar_query(selected_topic, scope, timeout_s=self._stage_timeout("query_generation"))
+            )
+            for selected_topic in scope.selected_topics[:3]
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for selected_topic, result in zip(scope.selected_topics[:3], results):
+            if isinstance(result, AgentBudgetTimeout):
+                emit_event("note", {"text": f"'{selected_topic}' 쿼리 생성이 늦어 원문 기술명을 검색어로 사용합니다."}, stage="scholar_scout", source="system")
+                generated.append({"query": selected_topic, "rationale": "쿼리 생성 시간 예산 초과로 원문 사용"})
+            elif isinstance(result, Exception):
+                raise result
+            else:
+                generated.append(result.model_dump())
         return [item["query"] for item in generated], generated
 
     async def _run_scholar_scout(self, queries: list[str], *, max_results: int) -> dict[str, Any]:
@@ -240,19 +349,47 @@ class ResearchPipeline:
             stage="scholar_scout",
             source="system",
         )
-        responses = []
-        for query in queries:
-            responses.append(await self.liner.search_scholar(query, lang="ko", max_results=max_results, stage="scholar_scout"))
-        return _merge_search_results(responses)
+        tasks = [
+            asyncio.create_task(
+                self.liner.search_scholar(
+                    query,
+                    lang="ko",
+                    max_results=max_results,
+                    stage="scholar_scout",
+                    timeout_s=self._stage_timeout("scholar_search"),
+                )
+            )
+            for query in queries[:3]
+        ]
+        responses = await asyncio.gather(*tasks, return_exceptions=True)
+        normalized = []
+        for response in responses:
+            if isinstance(response, Exception):
+                emit_event("error", {"name": "scholar_search", "message": str(response)}, stage="scholar_scout", source="liner")
+                normalized.append({"results": [], "totalCount": 0, "error": str(response)})
+            else:
+                normalized.append(response)
+        return _merge_search_results(normalized)
 
     async def _run_vocabulary_bridge(self, topic: str, scholar: dict[str, Any]):
         emit_event("note", {"text": "Vocabulary Bridge: 학술 용어를 산업 검색어와 세 검색 관점으로 변환합니다."}, stage="vocabulary_bridge", source="system")
-        return await self.agents.vocabulary_bridge(topic, scholar)
+        try:
+            return await self.agents.vocabulary_bridge(topic, scholar, timeout_s=self._stage_timeout("academic_vocab"))
+        except AgentBudgetTimeout:
+            emit_event("note", {"text": "Vocabulary Bridge 시간 예산이 끝나 학술 주제를 산업 검색어로 그대로 연결합니다."}, stage="vocabulary_bridge", source="system")
+            return VocabularyBridgeResult(
+                terms=[topic],
+                query_families=QueryFamilies(technology=[topic]),
+                mapping_confidence=0,
+                rationale="용어 변환 시간 예산 초과로 입력 주제를 사용했습니다.",
+            )
 
     def _build_adoption_query_specs(self, vocabulary: Any, overrides: list[str] | None) -> list[tuple[str, str]]:
         if overrides:
-            return [(query, "manual") for query in overrides]
-        families = vocabulary.query_families or {"technology": vocabulary.terms}
+            return [(query, "manual") for query in overrides[: self.runtime.max_adoption_queries]]
+        families = vocabulary.query_families.model_dump()
+        if not any(families.values()):
+            families = {"technology": vocabulary.terms, "use_case": [], "context": []}
         specs: list[tuple[str, str]] = []
         for family in ("technology", "use_case", "context"):
             for term in families.get(family, []):
@@ -260,7 +397,7 @@ class ResearchPipeline:
                     specs.append((term, family))
         if not specs:
             specs = [(term, "technology") for term in vocabulary.terms]
-        return list(dict.fromkeys(specs))
+        return list(dict.fromkeys(specs))[: self.runtime.max_adoption_queries]
 
     async def _run_adoption_scout(self, query_specs: list[tuple[str, str]], *, max_results: int) -> list[dict[str, Any]]:
         emit_event(
@@ -269,21 +406,42 @@ class ResearchPipeline:
             stage="adoption_scout",
             source="system",
         )
-        responses = []
-        for query, family in query_specs:
-            response = await self.liner.search_web(query, lang="ko", max_results=max_results, stage="adoption_scout")
+        async def search_one(query: str, family: str) -> dict[str, Any]:
+            response = await self.liner.search_web(
+                query,
+                lang="ko",
+                max_results=max_results,
+                stage="adoption_scout",
+                timeout_s=self._stage_timeout("adoption_search"),
+            )
             tagged = dict(response)
             tagged["query"] = query
             tagged["query_family"] = family
             tagged["results"] = [_tag_item(item, family) for item in response.get("results", [])]
-            responses.append(tagged)
-        return responses
+            return tagged
+
+        responses = await asyncio.gather(
+            *(search_one(query, family) for query, family in query_specs[: self.runtime.max_adoption_queries]),
+            return_exceptions=True,
+        )
+        normalized = []
+        for response in responses:
+            if isinstance(response, Exception):
+                emit_event("error", {"name": "adoption_search", "message": str(response)}, stage="adoption_scout", source="liner")
+                normalized.append({"results": [], "totalCount": 0, "error": str(response)})
+            else:
+                normalized.append(response)
+        return normalized
 
     async def _extract_academic_records(self, items: list[dict[str, Any]]) -> tuple[list[AcademicEvidenceRecord], dict[str, int]]:
         emit_event("note", {"text": f"Scholar 결과 {len(items)}건에서 학술 적용 주장과 검증 신호를 구조화합니다."}, stage="academic_extraction", source="system")
         if not items:
             return [], {"total_relevant_results": 0, "structured_record_count": 0, "failed_count": 0}
-        batch: AcademicExtractionBatch = await self.agents.academic_extract(items)
+        try:
+            batch: AcademicExtractionBatch = await self.agents.academic_extract(items, timeout_s=self._stage_timeout("academic_extraction"))
+        except AgentBudgetTimeout:
+            emit_event("note", {"text": "학술 근거 구조화 시간 예산이 끝나 검색 결과만으로 잠정 판정합니다."}, stage="academic_extraction", source="system")
+            return [], {"total_relevant_results": len(items), "structured_record_count": 0, "failed_count": len(items), "timed_out": True}
         records: list[AcademicEvidenceRecord] = []
         for extraction in batch.records:
             if not extraction.is_relevant or extraction.extraction_confidence < 0.55:
@@ -329,7 +487,11 @@ class ResearchPipeline:
         emit_event("note", {"text": f"산업 검색 결과 {len(items)}건에서 실제 도입·중단 사건을 구조화합니다."}, stage="adoption_extraction", source="system")
         if not items:
             return [], {"total_relevant_results": 0, "structured_record_count": 0, "failed_count": 0}
-        batch: AdoptionExtractionBatch = await self.agents.adoption_extract(items)
+        try:
+            batch: AdoptionExtractionBatch = await self.agents.adoption_extract(items, timeout_s=self._stage_timeout("adoption_extraction"))
+        except AgentBudgetTimeout:
+            emit_event("note", {"text": "산업 도입 근거 구조화 시간 예산이 끝나 확인된 기록만으로 잠정 판정합니다."}, stage="adoption_extraction", source="system")
+            return [], {"total_relevant_results": len(items), "structured_record_count": 0, "failed_count": len(items), "timed_out": True}
         records: list[AdoptionEvidenceRecord] = []
         for extraction in batch.records:
             if not extraction.is_relevant or extraction.extraction_confidence < 0.55:
@@ -375,7 +537,13 @@ class ResearchPipeline:
             "failed_count": max(0, len(items) - len(records)),
         }
 
-    async def _run_cluster_linkage(self, research_clusters: list[ResearchCluster], adoption_clusters: list[AdoptionCluster]) -> list[ClusterLink]:
+    async def _run_cluster_linkage(
+        self,
+        research_clusters: list[ResearchCluster],
+        adoption_clusters: list[AdoptionCluster],
+        *,
+        timeout_stage: str = "linkage",
+    ) -> list[ClusterLink]:
         emit_event(
             "note",
             {"text": f"연구 클러스터 {len(research_clusters)}개와 산업 클러스터 {len(adoption_clusters)}개를 네 차원으로 비교합니다."},
@@ -390,8 +558,11 @@ class ResearchPipeline:
                 pairs.append({"research": _cluster_summary(research), "adoption": _cluster_summary(adoption)})
         dimensions = {}
         if pairs:
-            result = await self.agents.cluster_link(pairs)
-            dimensions = {(item.research_cluster_id, item.adoption_cluster_id): item for item in result.links}
+            try:
+                result = await self.agents.cluster_link(pairs, timeout_s=self._stage_timeout(timeout_stage))
+                dimensions = {(item.research_cluster_id, item.adoption_cluster_id): item for item in result.links}
+            except AgentBudgetTimeout:
+                emit_event("note", {"text": "클러스터 연결 판단 시간 예산이 끝나 텍스트 유사도와 검색 범위만으로 연결을 계산합니다."}, stage="cluster_linkage", source="system")
         adoption_by_id = {cluster.cluster_id: cluster for cluster in adoption_clusters}
         links: list[ClusterLink] = []
         for research in research_clusters:
@@ -428,6 +599,78 @@ class ResearchPipeline:
             source="system",
         )
         return links
+
+    def _stage_timeout(self, stage: str, *, reserve_s: float | None = None) -> float:
+        configured = {
+            "scope": self.runtime.scope_timeout_s,
+            "query_generation": self.runtime.query_generation_timeout_s,
+            "scholar_search": self.runtime.scholar_search_timeout_s,
+            "academic_vocab": self.runtime.academic_vocab_timeout_s,
+            "adoption_search": self.runtime.adoption_search_timeout_s,
+            "academic_extraction": self.runtime.academic_extraction_timeout_s,
+            "adoption_extraction": self.runtime.adoption_extraction_timeout_s,
+            "linkage": self.runtime.linkage_timeout_s,
+            "counter_relink": self.runtime.counter_relink_timeout_s,
+            "adversarial": self.runtime.adversarial_timeout_s,
+            "deep_research": self.runtime.deep_research_timeout_s,
+            "finalization": self.runtime.finalization_timeout_s,
+            "visualization": self.runtime.visualization_timeout_s,
+        }[stage]
+        if reserve_s is None:
+            reserve_s = self.runtime.final_reserve_s if stage not in {"finalization", "visualization"} else 0
+        return self.deadline.timeout(configured, reserve_s=reserve_s)
+
+    def _remember_partial(
+        self,
+        *,
+        topic: str,
+        scope: Any,
+        scholar: dict[str, Any],
+        adoption: list[dict[str, Any]],
+        scholar_queries: list[str],
+        adoption_query_specs: list[tuple[str, str]],
+        counter_query: str,
+        vocabulary: Any,
+        academic_records: list[Any],
+        adoption_records: list[Any],
+        research_clusters: list[Any],
+        adoption_clusters: list[Any],
+        links: list[ClusterLink],
+        analyses: list[dict[str, Any]],
+        top_candidate: dict[str, Any],
+        counter_evidence: list[dict[str, Any]],
+        reason: str,
+        deep_research: dict[str, Any] | None = None,
+        visualization: dict[str, Any] | None = None,
+    ) -> None:
+        self.last_partial_result = self._build_response(
+            topic=topic,
+            scope=scope,
+            scholar=scholar,
+            adoption=adoption,
+            scholar_queries=scholar_queries,
+            adoption_query_specs=adoption_query_specs,
+            counter_query=counter_query,
+            vocabulary=vocabulary,
+            academic_records=academic_records,
+            adoption_records=adoption_records,
+            research_clusters=research_clusters,
+            adoption_clusters=adoption_clusters,
+            links=links,
+            analyses=analyses,
+            top_candidate=top_candidate,
+            counter_evidence=counter_evidence,
+            deep_research=deep_research or {"used": False, "timed_out": False, "status": "not_started"},
+            visualization=visualization or {"requested": False, "artifact_received": False},
+            query_generations=[],
+        )
+        self.last_partial_result.update(
+            {
+                "analysis_status": "partial",
+                "partial_reason": reason,
+                "remaining_budget_s": round(self.deadline.remaining(), 2),
+            }
+        )
 
     def _coverage(self, *, academic_records: list[Any], adoption_records: list[Any], scholar_items: list[dict[str, Any]], adoption_items: list[dict[str, Any]], query_family_count: int, mapping_confidence: float, structured_record_count: int, total_relevant_results: int, adversarial: dict[str, Any] | None) -> dict[str, Any]:
         return calculate_coverage_confidence(
@@ -512,7 +755,17 @@ class ResearchPipeline:
 
     async def _run_adversarial_verifier(self, counter_query: str) -> dict[str, Any]:
         emit_event("note", {"text": "갭을 선언하기 전에 동일한 사용 사례·환경에서 이미 운영 중이라는 반증을 검색합니다."}, stage="adversarial_verifier", source="system")
-        return await self.liner.search_agent([{"role": "user", "content": counter_query}], mode="general", lang="ko", stage="adversarial_verifier")
+        try:
+            return await self.liner.search_agent(
+                [{"role": "user", "content": counter_query}],
+                mode="general",
+                lang="ko",
+                stage="adversarial_verifier",
+                timeout_s=self._stage_timeout("adversarial"),
+            )
+        except AgentBudgetTimeout:
+            emit_event("note", {"text": "반증 검색 시간 예산이 끝나 1차 근거를 기준으로 잠정 판정합니다."}, stage="adversarial_verifier", source="system")
+            return {"events": [], "timed_out": True, "timeout_kind": "budget"}
 
     def _counter_query(self, topic: str, analysis: dict[str, Any]) -> str:
         cluster = analysis.get("research_cluster", {})
@@ -529,7 +782,7 @@ class ResearchPipeline:
             return {"used": False, "timed_out": False, "status": "skipped", "reason": reason, "review": {}}
         reasons = analysis.get("deep_research_reasons", [])
         emit_event("note", {"text": f"{'; '.join(reasons)} → Deep Research로 조건부 승격합니다."}, stage="conditional_deep_research", source="system")
-        timeout_s = float(os.environ.get("DEEP_RESEARCH_TIMEOUT_S", "25"))
+        timeout_s = self._stage_timeout("deep_research")
         research = await self.liner.deep_research(
             [{"role": "user", "content": f"Investigate the application gap for {topic}. Analyze this candidate: {analysis}. Counter-evidence: {counter_evidence}"}],
             lang="ko",
@@ -541,7 +794,12 @@ class ResearchPipeline:
             reason = "Deep Research timeout → Search 근거로 잠정 결론을 유지하고 확신도를 낮춥니다."
             emit_event("note", {"text": reason}, stage="conditional_deep_research", source="system")
             return {"used": True, "timed_out": True, "status": "timeout", "reason": reason, "events_received": len(research.get("events", [])), "report": report, "review": {}, "adoption_items": [], "adoption_records": []}
-        review = await self.agents.review_deep_research(report) if report else None
+        review = None
+        if report:
+            try:
+                review = await self.agents.review_deep_research(report, timeout_s=self._stage_timeout("finalization"))
+            except AgentBudgetTimeout:
+                emit_event("note", {"text": "Deep Research 검토 시간 예산이 끝나 보고서 자체를 보조 근거로만 보관합니다."}, stage="conditional_deep_research", source="system")
         deep_items = _extract_counter_items(research)
         deep_records, _ = await self._extract_adoption_records(deep_items)
         return {
@@ -558,8 +816,14 @@ class ResearchPipeline:
 
     async def _run_gap_narrative(self, analysis: dict[str, Any], research_clusters: list[ResearchCluster], adoption_clusters: list[AdoptionCluster]) -> dict[str, Any]:
         try:
-            result = await self.agents.gap_narrative({"analysis": analysis, "research_clusters": [item.model_dump() for item in research_clusters], "adoption_clusters": [item.model_dump() for item in adoption_clusters]})
+            result = await self.agents.gap_narrative(
+                {"analysis": analysis, "research_clusters": [item.model_dump() for item in research_clusters], "adoption_clusters": [item.model_dump() for item in adoption_clusters]},
+                timeout_s=self._stage_timeout("finalization", reserve_s=0),
+            )
             return result.model_dump()
+        except AgentBudgetTimeout:
+            emit_event("note", {"text": "최종 설명 생성 시간 예산이 끝나 코드로 계산한 설명을 사용합니다."}, stage="finalization", source="system")
+            return _fallback_narrative(analysis)
         except Exception as exc:
             emit_event("error", {"name": "gap_narrator", "message": str(exc)}, stage="finalization", source="openai")
             return _fallback_narrative(analysis)
@@ -568,7 +832,14 @@ class ResearchPipeline:
         emit_event("note", {"text": "최종 점수와 연구·산업 연결 구조를 Gap Map 시각화로 전달합니다."}, stage="gap_map", source="system")
         scores = analysis.get("scores", {})
         query = f"Application gap comparison for {topic}: {scores}. Label: {analysis.get('label')}. Gap types: {analysis.get('gap_types', [])}."
-        visualization = await self.liner.visualize(query, is_search_context=True, max_results=max_results, appearance="light", stage="gap_map")
+        visualization = await self.liner.visualize(
+            query,
+            is_search_context=True,
+            max_results=max_results,
+            appearance="light",
+            stage="gap_map",
+            timeout_s=self._stage_timeout("visualization", reserve_s=0),
+        )
         return {"requested": True, "artifact_received": _has_event_type(visualization, "data-atlas"), "events_received": len(visualization.get("events", []))}
 
     def _insufficient_result(self, *, topic: str, scope: Any, scholar: dict[str, Any], scholar_queries: list[str], query_generations: list[dict[str, Any]], academic_records: list[Any]) -> dict[str, Any]:
@@ -670,6 +941,39 @@ async def run_pipeline(topic: str, **kwargs: Any) -> dict[str, Any]:
     return await ResearchPipeline().run(topic, **kwargs)
 
 
+def build_deadline_result(topic: str, reason: str) -> dict[str, Any]:
+    """Return a renderable result when the request expires before first scoring."""
+    return {
+        "topic": topic,
+        "scope": {"status": "unconfirmed", "selected_topics": [], "rationale": reason},
+        "queries": {"scholar": [], "adoption": [], "counter": ""},
+        "scores": {"evidence_maturity": 0, "adoption_evidence": 0, "coverage_confidence": 0, "gap_priority": 0},
+        "label": "insufficient_evidence",
+        "gap_types": ["possible_no_adoption_link"],
+        "rationale": reason,
+        "connected_points": [],
+        "gap_points": [],
+        "potential_points": [],
+        "evidence": [],
+        "counter_evidence": [],
+        "deep_research": {"used": False, "timed_out": True, "status": "not_started", "reason": reason},
+        "visualization": {"requested": False, "artifact_received": False},
+        "academic_evidence": [],
+        "adoption_evidence": [],
+        "research_clusters": [],
+        "adoption_clusters": [],
+        "links": [],
+        "gap_candidates": [],
+        "scholar": {"results": []},
+        "adoption": [],
+        "scholar_query_generation": [],
+        "vocabulary": {"terms": [], "industry_terms": [], "query_families": {}, "mapping_confidence": 0, "rationale": ""},
+        "gap_candidate": None,
+        "analysis_status": "partial",
+        "partial_reason": reason,
+    }
+
+
 def _tag_item(item: dict[str, Any], family: str) -> dict[str, Any]:
     tagged = dict(item)
     tagged["query_family"] = tagged.get("query_family") or family
@@ -742,6 +1046,8 @@ def _cluster_summary(cluster: Any) -> dict[str, Any]:
 
 
 def _query_family_count(query_families: dict[str, list[str]], query_specs: list[tuple[str, str]]) -> int:
+    if hasattr(query_families, "model_dump"):
+        query_families = query_families.model_dump()
     if query_families:
         return sum(bool(query_families.get(family)) for family in ("technology", "use_case", "context"))
     return len({family for _, family in query_specs if family in {"technology", "use_case", "context"}})
