@@ -5,6 +5,7 @@ import { connectStream } from '../lib/sse'
 // Raw API Stream/API 테스트와 분리된, 이 프로젝트의 유일한 "제품" 화면.
 
 const STAGE_LABEL = {
+  input_preflight: '입력 확인하는 중',
   scope_calibrator: '주제 범위 확인하는 중',
   scholar_scout: '학술 근거 검색하는 중',
   vocabulary_bridge: '산업 용어로 변환하는 중',
@@ -68,6 +69,16 @@ function StopIcon() {
   )
 }
 
+function WarningIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  )
+}
+
 // 결과가 길어져서 아래로 많이 스크롤됐을 때만 "맨 위로" 버튼을 보여준다.
 function useScrollPastTop(threshold = 400) {
   const [past, setPast] = useState(false)
@@ -89,8 +100,10 @@ export default function UserView() {
   const [result, setResult] = useState(null)
   const [artifact, setArtifact] = useState(null)
   const [errorMsg, setErrorMsg] = useState(null)
+  const [liveSuggestions, setLiveSuggestions] = useState([])
   const disconnectRef = useRef(null)
   const abortRef = useRef(null)
+  const suggestAbortRef = useRef(null)
 
   useEffect(() => {
     disconnectRef.current = connectStream((event) => {
@@ -103,14 +116,46 @@ export default function UserView() {
     return () => disconnectRef.current?.()
   }, [])
 
-  async function runAnalyze(e) {
-    e.preventDefault()
-    if (!topic.trim()) return
+  // 제출 전, 타이핑하는 동안 가볍게 /api/suggestions로 추천 검색어를 미리 보여준다.
+  // 입력을 멈추고 잠깐(500ms) 있어야 호출해서, 한 글자씩 칠 때마다 요청이 나가진 않는다.
+  useEffect(() => {
+    if (status !== 'idle' || topic.trim().length < 2) {
+      setLiveSuggestions([])
+      return
+    }
+
+    const timer = setTimeout(async () => {
+      suggestAbortRef.current?.abort()
+      const controller = new AbortController()
+      suggestAbortRef.current = controller
+      try {
+        const res = await fetch('/api/suggestions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ topic }),
+          signal: controller.signal,
+        })
+        const data = await res.json().catch(() => null)
+        setLiveSuggestions(Array.isArray(data?.recommendations) ? data.recommendations : [])
+      } catch {
+        // 보조 기능이라 실패해도 조용히 무시한다 — 사용자가 그냥 계속 타이핑하면 됨.
+      }
+    }, 500)
+
+    return () => clearTimeout(timer)
+  }, [topic, status])
+
+  async function runAnalyze(e, topicOverride) {
+    e?.preventDefault()
+    const topicToRun = topicOverride ?? topic
+    if (!topicToRun.trim()) return
+    if (topicOverride) setTopic(topicOverride)
     setStatus('running')
     setResult(null)
     setArtifact(null)
     setErrorMsg(null)
     setStage(null)
+    setLiveSuggestions([])
 
     const controller = new AbortController()
     abortRef.current = controller
@@ -119,7 +164,7 @@ export default function UserView() {
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic, max_results: 10 }),
+        body: JSON.stringify({ topic: topicToRun, max_results: 10 }),
         signal: controller.signal,
       })
 
@@ -162,6 +207,18 @@ export default function UserView() {
 
   function stopAnalyze() {
     abortRef.current?.abort()
+  }
+
+  // 사전 검사에서 온 추천 검색어 칩을 클릭하면 그 주제로 바로 다시 분석을 돌린다.
+  function runWithSuggestion(rec) {
+    runAnalyze(null, rec)
+  }
+
+  // 타이핑 중 뜬 실시간 추천은 아직 제출 전이라, 클릭하면 입력창만 채우고
+  // 사용자가 직접 확인 후 제출하도록 둔다 (바로 분석을 돌리지 않음).
+  function applySuggestion(rec) {
+    setTopic(rec)
+    setLiveSuggestions([])
   }
 
   const showScrollTop = useScrollPastTop()
@@ -217,6 +274,19 @@ export default function UserView() {
         )}
       </form>
 
+      {status === 'idle' && liveSuggestions.length > 0 && (
+        <div className="user-view-live-suggestions">
+          <span className="live-suggestions-label">이런 주제는 어떠세요?</span>
+          <div className="user-view-suggestions">
+            {liveSuggestions.map((rec) => (
+              <button key={rec} type="button" className="suggestion-chip" onClick={() => applySuggestion(rec)}>
+                {rec}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {status === 'running' && (
         <div className="user-view-progress">
           <span className="spinner" />
@@ -224,10 +294,48 @@ export default function UserView() {
         </div>
       )}
 
-      {status === 'error' && <div className="user-view-error">{errorMsg}</div>}
+      {status === 'error' && (
+        <div className="user-view-error">
+          <WarningIcon />
+          <span>{errorMsg}</span>
+        </div>
+      )}
 
-      {status === 'done' && result && (
+      {/* 사전 검사에서 rejected/needs_calibration으로 걸러지면 파이프라인 자체가 안 돌고
+          여기서 끝난다 — 점수/라벨이 없는 완전히 다른 모양의 결과라 따로 렌더링한다. */}
+      {status === 'done' && result && result.status !== 'completed' && (
+        <div className="user-view-guidance">
+          <p className="user-view-guidance-message">
+            {/* 사전 검사 모델이 추천을 만들어놓고도 rejected 전용 문구("추천 검색어가
+                없어요...")를 잘못 재사용하는 경우가 있어서, 추천이 실제로 있으면
+                그 모순된 문구 대신 자연스러운 안내로 바꿔 보여준다. */}
+            {result.recommendations?.length > 0 && result.message?.includes('추천 검색어가 없어요')
+              ? '입력하신 주제로 아래 추천 검색어를 만들었어요. 하나를 선택해 보세요.'
+              : result.message}
+          </p>
+          {result.recommendations?.length > 0 && (
+            <div className="user-view-suggestions">
+              {result.recommendations.map((rec) => (
+                <button key={rec} type="button" className="suggestion-chip" onClick={() => runWithSuggestion(rec)}>
+                  {rec}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {status === 'done' && result && result.status === 'completed' && (
         <div className="user-view-result">
+          {result.preflight?.status === 'auto_corrected' && (
+            // 검색엔진의 "이 검색어에 대한 결과가 없어 다음으로 표시합니다" 안내와 같은
+            // 익숙한 패턴 — 카드/배지보다 이게 훨씬 신뢰가 가는 관용구라 그대로 따름.
+            <p className="user-view-corrected-note">
+              <span>‘{result.input_topic}’에 대한 검색결과가 없어 다음에 대한 결과를 표시합니다:</span>{' '}
+              <strong className="corrected-note-term">{result.topic}</strong>
+            </p>
+          )}
+
           <div className={`user-view-label ${LABEL_TONE[result.label] || 'label-neutral'}`}>
             {LABEL_TEXT[result.label] || result.label}
           </div>
@@ -264,16 +372,41 @@ export default function UserView() {
                   const doc = iframe.contentDocument
                   if (!doc?.documentElement) return
 
+                  // Liner 위젯이 html/body가 아니라 자기 안의 어떤 wrapper div에
+                  // height:100vh + overflow:auto를 직접 걸어서 스스로 스크롤 영역을 만드는
+                  // 경우가 있다. html/body만 풀어서는 그 wrapper까지는 안 풀리니, 실제로
+                  // overflow가 걸린 요소를 전부 찾아서 같이 풀어준다.
+                  const unclamp = () => {
+                    doc.documentElement.style.setProperty('height', 'auto', 'important')
+                    doc.documentElement.style.setProperty('overflow', 'visible', 'important')
+                    if (doc.body) {
+                      doc.body.style.setProperty('height', 'auto', 'important')
+                      doc.body.style.setProperty('min-height', '0', 'important')
+                      doc.body.style.setProperty('overflow', 'visible', 'important')
+                    }
+                    doc.querySelectorAll('*').forEach((el) => {
+                      const cs = doc.defaultView?.getComputedStyle(el)
+                      if (!cs) return
+                      if (['auto', 'scroll'].includes(cs.overflow) || ['auto', 'scroll'].includes(cs.overflowY)) {
+                        el.style.setProperty('overflow', 'visible', 'important')
+                        el.style.setProperty('height', 'auto', 'important')
+                        el.style.setProperty('max-height', 'none', 'important')
+                      }
+                    })
+                  }
+
                   const resize = () => {
-                    iframe.style.height = `${doc.documentElement.scrollHeight}px`
+                    unclamp()
+                    const h = Math.max(doc.documentElement.scrollHeight, doc.body?.scrollHeight || 0)
+                    iframe.style.height = `${h}px`
                   }
                   resize()
 
-                  // 차트 라이브러리가 로드 직후 비동기로 그려지는 경우 scrollHeight가
-                  // 처음엔 작게 잡혀서 한 번으로는 부족하다. 계속 감시해서 늘어나면 다시 맞춘다.
-                  if ('ResizeObserver' in window) {
+                  // 차트 라이브러리가 로드 직후 비동기로 그려지는 경우 크기가 처음엔 작게
+                  // 잡혀서 한 번으로는 부족하다. 계속 감시해서 늘어나면 다시 맞춘다.
+                  if ('ResizeObserver' in window && doc.body) {
                     const ro = new ResizeObserver(resize)
-                    ro.observe(doc.documentElement)
+                    ro.observe(doc.body)
                   } else {
                     setTimeout(resize, 200)
                     setTimeout(resize, 600)

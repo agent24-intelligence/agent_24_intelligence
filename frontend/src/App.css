@@ -140,6 +140,24 @@
   margin-bottom: 36px;
 }
 
+/* 제출 전 타이핑 중에 뜨는 실시간 추천 — 폼 바로 아래로 당겨 붙이고, 그 아래(진행/결과 영역)와는
+   폼과 같은 만큼 떨어뜨린다. 안 뜰 땐 폼의 margin-bottom 36px가 그대로 유지된다. */
+.user-view-live-suggestions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: -26px;
+  margin-bottom: 36px;
+  animation: rise-in 0.2s ease both;
+}
+
+.live-suggestions-label {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
 .user-view-form input {
   flex: 1;
   background: var(--surface);
@@ -235,12 +253,76 @@
 }
 
 .user-view-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   color: var(--red);
   background: var(--red-soft);
   border: 1px solid #f5c6c6;
   border-radius: var(--radius);
   padding: 16px;
+  text-align: left;
+  line-height: 1.5;
+}
+
+.user-view-error svg {
+  flex-shrink: 0;
+}
+
+/* 사전 검사(preflight)가 rejected/needs_calibration으로 걸러서 파이프라인을 안 태운
+   경우의 안내 블록 — 에러는 아니라서 빨강 대신 중립 톤으로 차분하게. */
+.user-view-guidance {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   text-align: center;
+  animation: rise-in 0.35s ease both;
+}
+
+.user-view-guidance-message {
+  color: var(--text);
+  font-size: 15px;
+  margin: 0 0 18px;
+  line-height: 1.6;
+}
+
+.user-view-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.suggestion-chip {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 13.5px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.12s ease;
+}
+
+.suggestion-chip:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  transform: translateY(-1px);
+}
+
+/* 검색엔진의 "이 검색어에 대한 결과가 없어 다음으로 표시합니다" 안내와 같은 스타일 —
+   카드/배지 없이 평문으로, 보정된 검색어만 굵게 강조 */
+.user-view-corrected-note {
+  color: var(--text-muted);
+  font-size: 13.5px;
+  text-align: center;
+  margin: 0 0 20px;
+}
+
+.corrected-note-term {
+  color: var(--text);
+  font-style: italic;
 }
 
 .user-view-result {
