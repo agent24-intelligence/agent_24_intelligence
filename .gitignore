@@ -25,6 +25,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+!frontend/src/lib/
+!frontend/src/lib/sse.js
 parts/
 sdist/
 var/

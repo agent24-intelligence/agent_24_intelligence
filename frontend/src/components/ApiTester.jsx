@@ -3,6 +3,9 @@ import { useState } from 'react'
 const DEFAULT_BODY = '{\n  \n}'
 
 export default function ApiTester() {
+  const [analyzeTopic, setAnalyzeTopic] = useState('온디바이스 sLLM 양자화')
+  const [analyzeStatus, setAnalyzeStatus] = useState('')
+  const [analyzeResult, setAnalyzeResult] = useState(null)
   const [target, setTarget] = useState('openai')
   const [method, setMethod] = useState('POST')
   const [path, setPath] = useState('/chat/completions')
@@ -48,8 +51,47 @@ export default function ApiTester() {
     }
   }
 
+  async function runAnalyze(e) {
+    e.preventDefault()
+    setAnalyzeStatus('실행 중...')
+    setAnalyzeResult(null)
+
+    try {
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topic: analyzeTopic, max_results: 10 }),
+      })
+      const data = await res.json()
+      setAnalyzeResult(data)
+      setAnalyzeStatus(res.ok ? '완료됨 — Raw API Stream 패널에서 단계별 이벤트 확인' : `실패 (${res.status})`)
+    } catch (err) {
+      setAnalyzeStatus(`실패: ${err}`)
+    }
+  }
+
   return (
     <div className="api-tester">
+      <div className="api-tester-section">
+        <h3>실전 파이프라인 실행</h3>
+        <p className="hint">입력한 주제로 Scholar/Web 검색 파이프라인을 시작한다.</p>
+        <form onSubmit={runAnalyze}>
+          <div className="form-row">
+            <input
+              value={analyzeTopic}
+              onChange={(e) => setAnalyzeTopic(e.target.value)}
+              placeholder="분석할 주제"
+              required
+            />
+            <button type="submit" disabled={!analyzeTopic.trim() || analyzeStatus === '실행 중...'}>
+              실전 파이프라인 실행
+            </button>
+          </div>
+        </form>
+        {analyzeStatus && <div className="demo-status">{analyzeStatus}</div>}
+        {analyzeResult && <pre className="result-box">{JSON.stringify(analyzeResult, null, 2)}</pre>}
+      </div>
+
       <div className="api-tester-section">
         <h3>모의 파이프라인 실행</h3>
         <p className="hint">실제 백엔드 파이프라인이 붙기 전, 이벤트 흐름 확인용 스텁을 돌린다.</p>

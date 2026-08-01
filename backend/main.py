@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-from routes import demo, proxy, stream  # noqa: E402 (dotenv must load first)
+from routes import analyze, demo, proxy, stream  # noqa: E402 (dotenv must load first)
 
 app = FastAPI(title="AGENT24 backend")
 
@@ -20,6 +20,7 @@ app.add_middleware(
 app.include_router(stream.router)
 app.include_router(proxy.router)
 app.include_router(demo.router)
+app.include_router(analyze.router)
 
 
 @app.get("/api/health")
