@@ -124,7 +124,7 @@
   font-size: 11.5px;
   font-weight: 600;
   padding: 5px 10px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   pointer-events: none;
   animation: toast-inout 1.6s ease both;
 }
@@ -158,7 +158,7 @@
   background: var(--surface);
   border: 1.5px solid var(--border);
   color: var(--text-muted);
-  border-radius: 12px;
+  border-radius: var(--radius);
   transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 
@@ -290,7 +290,7 @@
   background: var(--surface);
   border: 1.5px solid var(--border);
   color: var(--text);
-  border-radius: 12px;
+  border-radius: var(--radius);
   padding: 13px 18px;
   font-size: 14.5px;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
@@ -312,7 +312,7 @@
   background: var(--accent);
   border: none;
   color: var(--bg);
-  border-radius: 12px;
+  border-radius: var(--radius);
   transition: background 0.12s ease, transform 0.12s ease;
 }
 
@@ -347,6 +347,7 @@
   font-size: 14px;
   font-weight: 500;
   padding: 52px 0;
+  text-align: center;
 }
 
 .progress-main-row {
@@ -360,6 +361,7 @@
   font-size: 13px;
   color: var(--text-muted);
   font-style: italic;
+  text-align: center;
   animation: rise-in 0.2s ease both;
 }
 
@@ -455,14 +457,16 @@
 }
 
 /* 시간 예산 안에서 잠정 판정된 경우("partial") 안내 — topic-note/corrected-note와는
-   별개 조건(analysis_status)이라 둘 다 살려둠. border-radius를 안 줘서 밤티 이슈는 없음. */
+   별개 조건(analysis_status)이라 둘 다 살려둠. 왼쪽 강조선 대신 옅은 배경 톤만으로
+   구분해서 다른 카드들과 같은 언어를 쓴다. */
 .user-view-partial-note {
   width: 100%;
   margin: 0 0 18px;
-  padding: 10px 12px;
+  padding: 10px 14px;
   color: var(--text-muted);
   background: var(--surface-2);
-  border-left: 3px solid var(--accent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   font-size: 13px;
   line-height: 1.55;
   text-align: left;
@@ -518,6 +522,18 @@
   background: var(--surface-2);
 }
 
+/* 판정 색을 "낮은 점수" 칸에만 선택적으로 물려준다 — 그 숫자가 지금 판정의
+   근거이기 때문. score-low와 함께만 쓰이므로 순서상 score-low 배경(default)을 덮는다. */
+.score-card.score-low.tone-amber {
+  background: var(--amber-soft);
+  border-color: transparent;
+}
+
+.score-card.score-low.tone-green {
+  background: var(--green-soft);
+  border-color: transparent;
+}
+
 .score-label {
   display: block;
   color: var(--text-muted);
@@ -540,11 +556,11 @@
   margin: 0 0 18px;
 }
 
+/* 굵은 왼쪽 테두리 대신 그냥 본문 문단으로 — 지금은 클라이언트 요약이 아니라
+   백엔드가 실제로 근거로 쓴 rationale 원문이라 "인용구"처럼 강조할 필요가 없다. */
 .judgment-summary {
   width: 100%;
   margin: 0 0 18px;
-  padding: 2px 0 2px 14px;
-  border-left: 3px solid var(--text);
   color: var(--text);
   font-size: 15px;
   line-height: 1.7;
@@ -636,6 +652,10 @@
   gap: 6px;
 }
 
+/* 굵은 왼쪽 테두리(border-left) + 둥근 모서리 조합은 모서리가 이상하게 잘려 보이는
+   렌더링 버그가 있어서 전체적으로 안 쓰기로 했다 — 색 구분은 배경 없이 타입 글자
+   색만으로 준다. 지금은 "계산 근거" 안에 접혀 들어가는 검증용 디테일이라 톤도
+   차분하게 낮춰뒀다. */
 .structured-link {
   display: grid;
   grid-template-columns: max-content max-content 1fr;
@@ -643,22 +663,21 @@
   gap: 8px;
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-left: 3px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
   font-size: 12.5px;
 }
 
-.structured-link-direct {
-  border-left-color: var(--green);
+.structured-link-direct .structured-link-type {
+  color: var(--green);
 }
 
-.structured-link-partial {
-  border-left-color: var(--accent);
+.structured-link-partial .structured-link-type {
+  color: var(--amber);
 }
 
-.structured-link-blocked {
-  border-left-color: var(--red);
+.structured-link-blocked .structured-link-type {
+  color: var(--red);
 }
 
 .structured-link-type {
@@ -685,6 +704,14 @@
   color: var(--score-low);
 }
 
+.score-value.score-low.tone-amber {
+  color: var(--amber);
+}
+
+.score-value.score-low.tone-green {
+  color: var(--green);
+}
+
 .score-value.score-mid {
   color: var(--text-muted);
 }
@@ -708,7 +735,8 @@
 /* 판정 결과별 톤 — 갭(=이번 분석에서 제일 중요한 발견)은 앰버로, 이미 해소된 건
    그린으로, 판단 보류는 무채색으로. green-soft/red-soft가 이미 색을 쓰고 있던 것과
    맞춰서 label-gap/label-weak도 "장식"이 아니라 "의미 신호"로 색을 되살렸다 —
-   같은 계열(앰버) 안에서 확정/약한 신호를 채움 대비로 구분한다. */
+   둘 다 같은 앰버 계열 채움을 쓰되, 약한 신호는 살짝 더 옅게 둬서 "같은 방향,
+   낮은 확신도"라는 게 느껴지게 한다. */
 .user-view-label.label-gap {
   color: var(--amber);
   background: var(--amber-soft);
@@ -716,8 +744,9 @@
 }
 .user-view-label.label-weak {
   color: var(--amber);
-  background: var(--surface-2);
-  border-color: var(--border);
+  background: var(--amber-soft);
+  border-color: transparent;
+  opacity: 0.75;
 }
 .user-view-label.label-resolved {
   color: var(--green);
@@ -809,21 +838,25 @@
 .connection-group {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 12px 16px;
 }
 
-/* 굵은 왼쪽 테두리 대신, 옅은 배경 틴트와 제목 색만으로 톤을 구분한다 */
+/* 굵은 왼쪽 테두리 대신, 옅은 배경 틴트와 제목 색만으로 톤을 구분한다.
+   판정 라벨의 색 체계(그린=해소, 앰버=갭)와 통일해서 "연계된 근거"만 색이 튀던
+   문제를 없앴다 — 잠재 가능성은 아직 판단 보류라는 뜻으로 무채색 유지. */
 .connection-group.tone-connected {
   background: var(--green-soft);
 }
 
 .connection-group.tone-gap {
-  background: var(--accent-soft);
+  background: var(--amber-soft);
 }
 
 .connection-group.tone-potential {
-  background: var(--surface-2);
+  /* surface-2는 green-soft/amber-soft보다 훨씬 어두워서 세 카드를 나란히 두면
+     이 카드만 툭 꺼져 보였다 — 명도를 맞춰서 같은 세기의 무채색 톤으로 교체 */
+  background: var(--accent-soft);
 }
 
 .connection-group-title {
@@ -838,7 +871,7 @@
 }
 
 .connection-group.tone-gap .connection-group-title {
-  color: var(--accent-2);
+  color: var(--amber);
 }
 
 .connection-list {
@@ -920,10 +953,10 @@
 }
 
 .evidence-group-title {
-  margin: 0 0 8px;
-  font-size: 13px;
+  margin: 0 0 12px;
+  font-size: 15px;
   font-weight: 700;
-  color: var(--text-muted);
+  color: var(--text);
 }
 
 /* 근거 목록 페이지네이션 — "나머지 N개 더 보기"로 한 번에 다 펼치는 대신 5개씩 넘겨봄 */
@@ -981,16 +1014,16 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
 }
 
 /* 검색엔진 결과 카드처럼: 제목(링크) → 출처 도메인 → 스니펫 순서 */
 .evidence-item {
-  font-size: 13.5px;
-  padding: 12px 14px;
+  font-size: 14px;
+  padding: 14px 16px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
 }
 
 .evidence-item-head {
@@ -1023,8 +1056,8 @@
 .evidence-item-snippet {
   margin: 6px 0 0;
   color: var(--text-muted);
-  font-size: 12.5px;
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.55;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -1048,8 +1081,10 @@
   padding: 14px 24px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
-  position: relative;
-  z-index: 1;
+  /* dev 화면은 로그가 길게 쌓이니 스크롤해도 탭/새로고침에 계속 손이 닿게 상단 고정 */
+  position: sticky;
+  top: 0;
+  z-index: 20;
 }
 
 .app-title {
@@ -1165,10 +1200,16 @@ main {
   background: var(--surface);
   font-size: 13px;
   color: var(--text-muted);
+  /* dev 화면에선 위에 app-header가 고정돼 있어 그 높이만큼 밀어서 겹치지 않게 함 */
+  position: sticky;
+  top: 58px;
+  z-index: 19;
 }
 
 .app-clean .raw-stream-toolbar {
   padding: 16px 32px;
+  /* 세컨드 화면(클린 뷰)은 위에 헤더가 없어서 바로 맨 위에 고정 */
+  top: 0;
 }
 
 .status-dot {
@@ -1285,14 +1326,14 @@ main {
 .event-source {
   color: var(--text-muted);
   background: var(--bg);
-  border-radius: 6px;
+  border-radius: 999px;
   padding: 2px 8px;
   font-weight: 600;
 }
 
 .event-type {
   font-weight: 700;
-  border-radius: 6px;
+  border-radius: 999px;
   padding: 2px 9px;
   font-size: 11px;
   letter-spacing: 0.2px;
@@ -1320,7 +1361,7 @@ main {
   font-family: var(--mono);
   font-size: 12.5px;
   background: var(--bg);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 10px 12px;
 }
 
@@ -1373,7 +1414,7 @@ main {
   background: var(--bg);
   border: 1px solid var(--border);
   color: var(--text);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 8px 10px;
   font-size: 13.5px;
 }
@@ -1397,7 +1438,7 @@ main {
   color: var(--bg);
   font-weight: 600;
   padding: 8px 18px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   font-size: 13.5px;
   transition: background 0.12s ease;
 }
@@ -1477,7 +1518,7 @@ main {
   color: var(--red);
   background: var(--red-soft);
   border: 1px solid var(--error-border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 16px;
 }
 
@@ -1490,7 +1531,7 @@ main {
   margin-top: 14px;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 12px;
   max-height: 400px;
   overflow: auto;

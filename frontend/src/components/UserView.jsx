@@ -42,6 +42,16 @@ const LABEL_TONE = {
   no_gap: 'label-resolved',
 }
 
+// 판정 라벨의 색 계열을 점수 카드에도 "선택적으로"(낮은 점수 칸에만) 물려주기 위한 매핑.
+// 판단 보류 상태는 색으로 단정 지으면 안 되니 계열 없음(null)으로 둔다.
+const LABEL_COLOR_FAMILY = {
+  gap_candidate: 'amber',
+  emerging_adoption: 'amber',
+  insufficient_evidence: null,
+  unconfirmed_field: null,
+  no_gap: 'green',
+}
+
 const LINK_TYPE_TEXT = {
   direct: '직접 연결',
   partial: '부분 연결',
@@ -163,34 +173,13 @@ function scoreTone(value) {
   return 'score-low'
 }
 
-function judgmentSummary(result) {
-  const maturity = result?.scores?.evidence_maturity
-  const adoption = result?.scores?.adoption_evidence
-  const links = result?.gap_candidate?.links || result?.links || []
-  const directCount = links.filter((link) => link.link_type === 'direct').length
-  const partialCount = links.filter((link) => link.link_type === 'partial').length
-
-  const maturityText =
-    typeof maturity === 'number' && maturity < 40
-      ? '이번 검색에서 확인된 구조화 근거가 제한적'
-      : typeof maturity === 'number' && maturity < 70
-        ? '이번 검색에서 일부 확인된 상태'
-        : '이번 검색에서 충분히 확인된 상태'
-  const adoptionText =
-    typeof adoption === 'number' && adoption < 20
-      ? '강하게 확인되지 않았습니다'
-      : typeof adoption === 'number' && adoption < 60
-        ? '일부 확인됐습니다'
-        : '여러 사례에서 확인됐습니다'
-
-  let connectionText = '직접 연결되는 산업 사례는 확인되지 않아 추가 검증이 필요합니다.'
-  if (directCount > 0) {
-    connectionText = `직접 연결 ${directCount}건이 확인됐습니다.`
-  } else if (partialCount > 0) {
-    connectionText = `인접한 부분 연결 ${partialCount}건이 있으나 추가 검증이 필요합니다.`
-  }
-
-  return `연구 근거는 ${maturityText}이고, 실제 산업 도입은 ${adoptionText}. ${connectionText}`
+// 판정 색(앰버/그린)을 점수 카드 전체가 아니라 "낮은 점수" 칸에만 선택적으로 물려준다 —
+// 그 칸이 지금 판정의 근거가 되는 숫자이기 때문. 중/고점 칸은 그대로 무채색 유지.
+function scoreClass(value, label) {
+  const tone = scoreTone(value)
+  if (tone !== 'score-low') return tone
+  const family = LABEL_COLOR_FAMILY[label]
+  return family ? `${tone} tone-${family}` : tone
 }
 
 // 검색엔진 결과처럼 링크 밑에 출처 도메인을 보여주기 위한 호스트명 추출.
@@ -678,27 +667,8 @@ export default function UserView() {
             {LABEL_TEXT[result.label] || result.label}
           </div>
 
-          <div className="user-view-scores">
-            <div className={`score-card ${scoreTone(result.scores?.evidence_maturity)}`}>
-              <span className="score-label">검색된 연구 근거는 얼마나 충분한가</span>
-              <span className={`score-value ${scoreTone(result.scores?.evidence_maturity)}`}>
-                {typeof result.scores?.evidence_maturity === 'number' ? `${result.scores.evidence_maturity}%` : '-'}
-              </span>
-            </div>
-            <div className={`score-card ${scoreTone(result.scores?.adoption_evidence)}`}>
-              <span className="score-label">실제로 쓰이고 있나</span>
-              <span className={`score-value ${scoreTone(result.scores?.adoption_evidence)}`}>
-                {typeof result.scores?.adoption_evidence === 'number' ? `${result.scores.adoption_evidence}%` : '-'}
-              </span>
-            </div>
-            <div className={`score-card ${scoreTone(result.scores?.coverage_confidence)}`}>
-              <span className="score-label">판정 신뢰도</span>
-              <span className={`score-value ${scoreTone(result.scores?.coverage_confidence)}`}>
-                {typeof result.scores?.coverage_confidence === 'number' ? `${result.scores.coverage_confidence}%` : '-'}
-              </span>
-            </div>
-          </div>
-
+          {/* 라벨 바로 아래에 짧은 태그로 갭 종류를 붙여서, 스코어를 읽기 전에
+              "무슨 종류의 갭인지"부터 한눈에 들어오게 한다. */}
           {result.gap_types?.length > 0 && (
             <div className="gap-type-summary">
               <span className="gap-type-summary-label">주요 갭</span>
@@ -712,25 +682,31 @@ export default function UserView() {
             </div>
           )}
 
-          <p className="judgment-summary">{judgmentSummary(result)}</p>
+          <div className="user-view-scores">
+            <div className={`score-card ${scoreClass(result.scores?.evidence_maturity, result.label)}`}>
+              <span className="score-label">검색된 연구 근거는 얼마나 충분한가</span>
+              <span className={`score-value ${scoreClass(result.scores?.evidence_maturity, result.label)}`}>
+                {typeof result.scores?.evidence_maturity === 'number' ? `${result.scores.evidence_maturity}%` : '-'}
+              </span>
+            </div>
+            <div className={`score-card ${scoreClass(result.scores?.adoption_evidence, result.label)}`}>
+              <span className="score-label">실제로 쓰이고 있나</span>
+              <span className={`score-value ${scoreClass(result.scores?.adoption_evidence, result.label)}`}>
+                {typeof result.scores?.adoption_evidence === 'number' ? `${result.scores.adoption_evidence}%` : '-'}
+              </span>
+            </div>
+            <div className={`score-card ${scoreClass(result.scores?.coverage_confidence, result.label)}`}>
+              <span className="score-label">판정 신뢰도</span>
+              <span className={`score-value ${scoreClass(result.scores?.coverage_confidence, result.label)}`}>
+                {typeof result.scores?.coverage_confidence === 'number' ? `${result.scores.coverage_confidence}%` : '-'}
+              </span>
+            </div>
+          </div>
 
-          {(result.gap_candidate?.score_breakdown || result.rationale) && (
-            <details className="score-breakdown">
-              <summary className="score-breakdown-toggle">
-                <span className="score-breakdown-label">계산 근거</span>
-              </summary>
-              {result.rationale && <p className="score-breakdown-rationale">{result.rationale}</p>}
-              {result.gap_candidate?.score_breakdown && (
-                <div className="score-breakdown-list">
-                  {Object.entries(result.gap_candidate.score_breakdown).map(([name, breakdown]) => (
-                    <span key={name} className="score-breakdown-item">
-                      {name.replaceAll('_', ' ')} {breakdown.total}/100
-                    </span>
-                  ))}
-                </div>
-              )}
-            </details>
-          )}
+          {/* 예전엔 이 자리에 클라이언트에서 다시 조합한 요약 문장(judgmentSummary)이
+              따로 떠서 아래 rationale/연계 카드와 사실상 같은 내용을 다른 말로 두 번
+              반복했다 — 백엔드가 실제로 근거로 쓴 rationale 하나만 그대로 보여준다. */}
+          {result.rationale && <p className="judgment-summary">{result.rationale}</p>}
 
           {/* 판정 설명(라벨/점수/rationale)과 그 아래 보조 설명 묶음을 구분선으로 나눈다 —
               전부 텍스트/카드가 이어 붙어있으면 어디까지가 "판정"이고 어디부터가
@@ -757,6 +733,12 @@ export default function UserView() {
             </div>
           )}
 
+          {/* 결과 화면의 핵심 — "무엇이 연결됐고, 무엇이 안 됐고, 뭘 더 볼 수 있는지".
+              예전엔 이 바로 아래에 link_type 기반 StructuredLinks와 barriers 섹션이
+              같은 내용을 또 다른 형식(유사도 %, 장벽 카드)으로 반복해서 사용자 입장에서
+              뭘 봐야 할지 뒤죽박죽이었다. barriers는 백엔드가 실제로 채워주는 자리와
+              프론트가 읽는 자리가 어긋나 있어 원래도 항상 비어 있던 죽은 코드라 제거하고,
+              StructuredLinks는 검증용 기술 디테일로 보고 맨 아래 "계산 근거"로 옮겼다. */}
           {(result.connected_points?.length > 0 ||
             result.gap_points?.length > 0 ||
             result.potential_points?.length > 0) && (
@@ -765,7 +747,7 @@ export default function UserView() {
                 <ConnectionGroup tone="connected" title="연계된 근거" items={result.connected_points} />
               )}
               {result.gap_points?.length > 0 && (
-                <ConnectionGroup tone="gap" title="연계 안 된 부분 — 진짜 갭" items={result.gap_points} />
+                <ConnectionGroup tone="gap" title="연계 안 된 부분 (GAP)" items={result.gap_points} />
               )}
               {result.potential_points?.length > 0 && (
                 <ConnectionGroup
@@ -777,21 +759,9 @@ export default function UserView() {
             </div>
           )}
 
-          <StructuredLinks links={result.gap_candidate?.links || result.links} />
-
-          {(result.confirmed_barriers?.length > 0 || result.inferred_barriers?.length > 0) && (
-            <div className="user-view-connections">
-              {result.confirmed_barriers?.length > 0 && (
-                <ConnectionGroup tone="gap" title="확인된 장벽" items={result.confirmed_barriers} />
-              )}
-              {result.inferred_barriers?.length > 0 && (
-                <ConnectionGroup tone="potential" title="추론된 장벽" items={result.inferred_barriers} />
-              )}
-            </div>
-          )}
-          {/* 관찰(potential_points)에서 한 단계 더 나가서 "그럼 뭘 만들면 되는지" 실행
-              가능한 제안까지 준다 — 결과 화면에서 가장 실질적인 정보라 포인트 컬러로
-              강조해서 다른 회색 카드들 사이에서 눈에 띄게 한다. */}
+          {/* opportunity_suggestions: 스키마/프롬프트는 준비돼 있지만 지금 파이프라인이
+              결정론적 요약 함수를 쓰고 있어서 실제로는 항상 빈 배열로 온다 — 백엔드 연결이
+              끝나면 바로 뜨도록 UI는 살려둔다. */}
           {result.opportunity_suggestions?.length > 0 && (
             <div className="user-view-opportunities">
               <h3 className="opportunities-title">
@@ -838,6 +808,26 @@ export default function UserView() {
             )
           })()}
 
+          {/* 계산 근거 — 일반 사용자는 안 봐도 되는 검증용 디테일(점수 계산식, 링크 단위
+              유사도 %)이라 기본은 접어두고, 필요한 사람만 펼쳐 보게 한다. */}
+          {(result.gap_candidate?.score_breakdown ||
+            (result.gap_candidate?.links || result.links)?.length > 0) && (
+            <details className="score-breakdown">
+              <summary className="score-breakdown-toggle">
+                <span className="score-breakdown-label">계산 근거 자세히 보기</span>
+              </summary>
+              {result.gap_candidate?.score_breakdown && (
+                <div className="score-breakdown-list">
+                  {Object.entries(result.gap_candidate.score_breakdown).map(([name, breakdown]) => (
+                    <span key={name} className="score-breakdown-item">
+                      {name.replaceAll('_', ' ')} {breakdown.total}/100
+                    </span>
+                  ))}
+                </div>
+              )}
+              <StructuredLinks links={result.gap_candidate?.links || result.links} />
+            </details>
+          )}
         </div>
       )}
     </div>
