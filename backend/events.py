@@ -66,6 +66,15 @@ def unsubscribe(sub_id: int) -> None:
     _subscribers.pop(sub_id, None)
 
 
+def clear_history() -> None:
+    """Raw API Stream 최근 히스토리를 비운다.
+
+    연결 중인 화면의 현재 표시 상태는 프론트에서 직접 비운다. 여기서는 새로 접속했을 때
+    과거 이벤트가 다시 보이지 않도록 서버 메모리 히스토리만 지운다.
+    """
+    _history.clear()
+
+
 def _append_event_log(event: dict) -> None:
     """Raw API Stream 이벤트를 파일에도 남긴다.
 

@@ -11,7 +11,7 @@ import json
 from fastapi import APIRouter, Request
 from starlette.responses import StreamingResponse
 
-from events import subscribe, unsubscribe
+from events import clear_history, subscribe, unsubscribe
 
 router = APIRouter()
 
@@ -48,3 +48,9 @@ async def stream(request: Request):
             "X-Accel-Buffering": "no",  # 프록시 버퍼링 방지 (nginx 등 뒤에 있을 경우 대비)
         },
     )
+
+
+@router.delete("/api/stream/history")
+async def delete_stream_history():
+    clear_history()
+    return {"ok": True}
