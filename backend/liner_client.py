@@ -306,7 +306,8 @@ class LinerClient:
             )
             raise
 
-        result = {"events": events, "timed_out": False}
+        stream_error = any(event.get("type") == "data-error" for event in events)
+        result = {"events": events, "timed_out": False, "stream_error": stream_error}
         emit_event(
             "tool_result",
             {
@@ -314,6 +315,7 @@ class LinerClient:
                 "call_id": call_event["id"],
                 "events_received": len(events),
                 "event_types": [event.get("type") for event in events if event.get("type")],
+                "stream_error": stream_error,
             },
             stage=stage,
             source="liner",

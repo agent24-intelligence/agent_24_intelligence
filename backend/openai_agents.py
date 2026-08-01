@@ -238,7 +238,10 @@ class ResearchAgents:
                 "학술 주제를 산업 검색어로 바꾼다. 제품명, 오픈소스 프로젝트명, 표준 용어 등 "
                 "실제 산업에서 쓰이는 동의어를 최대 3개 제시한다. 확실하지 않은 직역은 "
                 "mapping_confidence를 낮춘다. query_families에는 technology, use_case, context "
-                "세 검색 관점별 용어를 넣고, 확인되지 않은 용어는 만들지 않는다."
+                "세 검색 관점별 용어를 넣고, 확인되지 않은 용어는 만들지 않는다. "
+                "technology에는 기술·모델 계열, use_case에는 실제로 해결하는 업무나 제품 기능, "
+                "context에는 산업·배포 환경을 넣는다. 단순 상위 개념만 반복하지 말고 산업 도입 "
+                "사례 검색에 쓸 수 있는 구체적 표현을 우선한다."
             ),
             output_type=VocabularyBridgeResult,
         )
@@ -246,10 +249,12 @@ class ResearchAgents:
             name="academic_evidence_extractor",
             model=small_model,
             instructions=(
-                "입력된 학술 검색 결과마다 가장 관련 높은 적용 주장 하나만 추출한다. "
+                "입력된 학술 검색 결과 중 관련 있는 결과에서만 가장 관련 높은 적용 주장 하나를 추출한다. "
+                "관련 없는 결과는 is_relevant=false 레코드로 반환하지 말고 records에서 생략한다. "
+                "반환하는 레코드는 모두 is_relevant=true여야 한다. "
                 "원문에 없는 내용을 추론하지 않는다. technology, use_case, context, expected_value를 "
                 "가능한 범위에서 분리하고, evidence_span은 입력 title 또는 snippet에 실제 존재하는 "
-                "문자열이어야 한다. 핵심 필드가 불명확하면 is_relevant=false로 반환한다. "
+                "문자열이어야 한다. 핵심 필드가 불명확하면 반환하지 않는다. "
                 "replication, synthesis, real-world 여부와 result_direction을 보수적으로 판정한다. "
                 "점수, label, gap type은 반환하지 않는다."
             ),
@@ -259,12 +264,17 @@ class ResearchAgents:
             name="adoption_evidence_extractor",
             model=small_model,
             instructions=(
-                "입력된 산업 검색 결과마다 실제 도입 증거를 추출한다. subject는 문서 작성자가 아니라 "
+                "입력된 산업 검색 결과 중 실제 도입 증거가 있는 결과만 추출한다. "
+                "관련 없는 결과는 is_relevant=false 레코드로 반환하지 말고 records에서 생략한다. "
+                "반환하는 레코드는 모두 is_relevant=true여야 한다. subject는 문서 작성자가 아니라 "
                 "기술을 실제로 사용하거나 사용하지 않는 조직이다. 구현·시험·운영이 직접 나타나면 "
                 "relation=uses, 거절·중단·제거·금지가 직접 나타나면 does_not_use, 계획·관심·호환·채용공고만 "
-                "있으면 is_relevant=false로 반환한다. uses일 때 usage_context와 adoption_stage를 보수적으로 "
+                "있으면 반환하지 않는다. uses일 때 usage_context와 adoption_stage를 보수적으로 "
                 "판정하고 deployed라는 단어만으로 production을 선택하지 않는다. evidence_span은 입력에 "
-                "실제로 존재해야 한다. 검색 결과 부재를 does_not_use로 바꾸지 않는다."
+                "실제로 존재해야 한다. 검색 결과 부재를 does_not_use로 바꾸지 않는다. "
+                "공식 기술 블로그, 엔지니어링 블로그, 기업 연구소 글, 사례 연구가 자사 시스템의 "
+                "production, rollout, serving, online A/B test, customer deployment, live system을 "
+                "직접 설명하면 실제 도입 증거로 본다."
             ),
             output_type=AdoptionExtractionBatch,
         )
@@ -394,7 +404,7 @@ class ResearchAgents:
 
     async def academic_extract(self, items: list[dict[str, Any]], *, timeout_s: float | None = None) -> AcademicExtractionBatch:
         prompt = json.dumps(
-            {"results": _compact_items(items), "task": "Extract one structured academic evidence record per result."},
+            {"results": _compact_items(items), "task": "Extract structured academic evidence records only from relevant results. Omit irrelevant results."},
             ensure_ascii=False,
         )
         return await self._run(
@@ -407,7 +417,7 @@ class ResearchAgents:
 
     async def adoption_extract(self, items: list[dict[str, Any]], *, timeout_s: float | None = None) -> AdoptionExtractionBatch:
         prompt = json.dumps(
-            {"results": _compact_items(items), "task": "Extract one structured adoption evidence record per result."},
+            {"results": _compact_items(items), "task": "Extract structured adoption evidence records only from direct adoption or non-adoption evidence. Omit irrelevant results."},
             ensure_ascii=False,
         )
         return await self._run(
@@ -535,12 +545,17 @@ def _compact_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         compact.append(
             {
                 "source_index": index,
-                "title": item.get("title") or "",
-                "snippet": item.get("snippet") or item.get("description") or "",
-                "url": item.get("url") or item.get("link") or "",
+                "title": _clip_text(item.get("title") or "", 220),
+                "snippet": _clip_text(item.get("snippet") or item.get("description") or "", 900),
+                "url": _clip_text(item.get("url") or item.get("link") or "", 320),
                 "citationCount": item.get("citationCount"),
                 "published_at": item.get("published_at") or item.get("publishedAt"),
                 "query_family": item.get("query_family"),
             }
         )
     return compact
+
+
+def _clip_text(value: Any, limit: int) -> str:
+    text = str(value or "")
+    return text if len(text) <= limit else text[:limit].rstrip() + "…"

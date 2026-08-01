@@ -10,6 +10,26 @@ export default function RawStream() {
   const [follow, setFollow] = useState(true)
   const bottomRef = useRef(null)
 
+  const refreshStream = async () => {
+    setEvents([])
+    try {
+      const res = await fetch('/api/stream/history', { method: 'DELETE' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    } catch (error) {
+      setEvents((prev) => [
+        ...prev,
+        {
+          id: `clear-failed-${Date.now()}`,
+          ts: new Date().toISOString(),
+          stage: 'raw_stream',
+          source: 'frontend',
+          type: 'error',
+          payload: { message: 'Raw API Stream 기록 삭제 실패', detail: String(error) },
+        },
+      ])
+    }
+  }
+
   useEffect(() => {
     const disconnect = connectStream(
       (event) => {
@@ -37,7 +57,7 @@ export default function RawStream() {
           <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
           자동 스크롤
         </label>
-        <button onClick={() => setEvents([])}>화면 비우기</button>
+        <button onClick={refreshStream}>새로고침</button>
       </div>
       <div className="raw-stream-body">
         {events.length === 0 && <div className="empty-hint">아직 이벤트 없음. 파이프라인 실행을 기다리는 중.</div>}

@@ -34,12 +34,12 @@ LABEL_THRESHOLDS = {
 
 ADOPTION_POINTS = {
     "end_user_use": {
-        "direct": {"production": 25, "limited_deployment": 16, "pilot": 10, "unknown": 7},
-        "partial": {"production": 12, "limited_deployment": 8, "pilot": 5, "unknown": 3},
+        "direct": {"production": 45, "limited_deployment": 25, "pilot": 12, "unknown": 8},
+        "partial": {"production": 25, "limited_deployment": 14, "pilot": 7, "unknown": 4},
     },
     "vendor_internal_use": {
-        "direct": {"production": 12, "limited_deployment": 9, "pilot": 6, "unknown": 4},
-        "partial": {"production": 6, "limited_deployment": 4, "pilot": 3, "unknown": 2},
+        "direct": {"production": 20, "limited_deployment": 12, "pilot": 7, "unknown": 4},
+        "partial": {"production": 10, "limited_deployment": 6, "pilot": 3, "unknown": 2},
     },
 }
 

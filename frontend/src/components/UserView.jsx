@@ -26,7 +26,7 @@ const STAGE_LABEL = {
 // 소개 문구("~분석합니다")와 톤을 맞춰서 정중체(합니다체)로 통일.
 const LABEL_TEXT = {
   gap_candidate: '아직 산업 현장에 적용되지 않았습니다',
-  emerging_adoption: '산업 적용이 초기 단계입니다',
+  emerging_adoption: '산업 적용이 일부 확인됐습니다',
   insufficient_evidence: '판단할 근거가 아직 부족합니다',
   unconfirmed_field: '입력한 분야를 다시 확인해주세요',
   no_gap: '이미 산업에 도입되어 있습니다',
@@ -296,7 +296,7 @@ export default function UserView() {
     // 'running'일 때만 막는다 — 이전엔 'idle'이 아니면(=done/error) 다 막아서, 결과를
     // 보고 있는 채로 입력을 고치면 추천도 안 뜨고 그렇다고 결과도 안 지워지는 어중간한
     // 상태였다. 이제 결과는 그대로 화면에 남겨두면서 새로 타이핑하는 동안 추천이 뜬다.
-    if (status === 'running' || topic.trim().length < 2) {
+    if (status === 'running' || (status === 'done' && result?.status !== 'completed') || topic.trim().length < 2) {
       setLiveSuggestions([])
       setLiveGuidance(null)
       // 이미 날아간 요청이 있으면 취소한다 — 안 그러면 입력을 지운 뒤에도 그 요청이
@@ -335,7 +335,7 @@ export default function UserView() {
     }, 350)
 
     return () => clearTimeout(timer)
-  }, [topic, status])
+  }, [topic, status, result?.status])
 
   async function runAnalyze(e, topicOverride) {
     e?.preventDefault()
@@ -422,6 +422,13 @@ export default function UserView() {
   }
 
   const showScrollTop = useScrollPastTop()
+  const showPreflightGuidance = status === 'done' && result && result.status !== 'completed'
+  const preflightGuidanceMessage =
+    result?.status === 'needs_calibration'
+      ? '입력하신 주제는 범위가 넓어요. 아래 추천 중 하나를 선택하거나 더 구체적으로 입력해 주세요.'
+      : result?.recommendations?.length > 0 && result?.message?.includes('검색어를 다시 확인해')
+        ? '입력하신 주제로 아래 추천 검색어를 만들었어요. 하나를 선택해 보세요.'
+        : result?.message
 
   return (
     <div className={`user-view${status === 'idle' ? ' is-idle' : ''}`}>
@@ -509,7 +516,7 @@ export default function UserView() {
         )}
       </form>
 
-      {status !== 'running' && liveSuggestions.length > 0 && (
+      {status !== 'running' && !showPreflightGuidance && liveSuggestions.length > 0 && (
         <div className={`user-view-live-suggestions${status === 'done' && result ? ' has-stale-result' : ''}`}>
           <span className="live-suggestions-label">추천 검색어</span>
           <div className="user-view-suggestions">
@@ -524,7 +531,7 @@ export default function UserView() {
 
       {/* 제출도 하기 전에 이 검색어로는 안 될 것 같다는 걸 미리 알려준다 — 버튼 눌러서
           결과 화면까지 가야 알게 되는 것보다 지금 바로 아는 게 낫다. */}
-      {status !== 'running' && liveSuggestions.length === 0 && liveGuidance && (
+      {status !== 'running' && !showPreflightGuidance && liveSuggestions.length === 0 && liveGuidance && (
         <div className="user-view-live-guidance">{liveGuidance}</div>
       )}
 
@@ -549,16 +556,9 @@ export default function UserView() {
 
       {/* 사전 검사에서 rejected/needs_calibration으로 걸러지면 파이프라인 자체가 안 돌고
           여기서 끝난다 — 점수/라벨이 없는 완전히 다른 모양의 결과라 따로 렌더링한다. */}
-      {status === 'done' && result && result.status !== 'completed' && (
+      {showPreflightGuidance && (
         <div className="user-view-guidance">
-          <p className="user-view-guidance-message">
-            {/* 사전 검사 모델이 추천을 만들어놓고도 rejected 전용 문구("검색어를 다시
-                확인해 주세요")를 잘못 재사용하는 경우가 있어서, 추천이 실제로 있으면
-                그 모순된 문구 대신 자연스러운 안내로 바꿔 보여준다. */}
-            {result.recommendations?.length > 0 && result.message?.includes('검색어를 다시 확인해')
-              ? '입력하신 주제로 아래 추천 검색어를 만들었어요. 하나를 선택해 보세요.'
-              : result.message}
-          </p>
+          <p className="user-view-guidance-message">{preflightGuidanceMessage}</p>
           {result.recommendations?.length > 0 && (
             <div className="user-view-suggestions">
               {result.recommendations.map((rec) => (
@@ -703,7 +703,6 @@ export default function UserView() {
               )}
             </div>
           )}
-
           {/* 관찰(potential_points)에서 한 단계 더 나가서 "그럼 뭘 만들면 되는지" 실행
               가능한 제안까지 준다 — 결과 화면에서 가장 실질적인 정보라 포인트 컬러로
               강조해서 다른 회색 카드들 사이에서 눈에 띄게 한다. */}
@@ -742,7 +741,7 @@ export default function UserView() {
                 )}
                 {adoption.length > 0 && (
                   <EvidenceGroup
-                    title="찾은 산업 도입 근거"
+                    title="찾은 산업 검색 결과"
                     items={adoption}
                     page={evidencePage.adoption}
                     onPageChange={(p) => setEvidencePage((v) => ({ ...v, adoption: p }))}
