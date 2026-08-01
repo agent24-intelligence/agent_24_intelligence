@@ -1,5 +1,6 @@
 .vscode
 
+logs/
 
 # Frontend (Vite/React)
 node_modules/
