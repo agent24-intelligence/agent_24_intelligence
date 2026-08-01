@@ -68,6 +68,11 @@ class ResearchPipeline:
             },
             "label": final_gap["gap_label"],
             "rationale": final_gap["rationale"],
+            # 어떤 게 연결됐고, 어떤 게 안 됐고(진짜 갭), 뭐가 더 연결될 여지가 있는지
+            # 사용자가 바로 볼 수 있게 rationale 문단과 별개로 최상위에도 노출한다.
+            "connected_points": final_gap.get("connected_points", []),
+            "gap_points": final_gap.get("gap_points", []),
+            "potential_points": final_gap.get("potential_points", []),
             "evidence": scholar.get("results", []) + _flatten_results(adoption),
             "counter_evidence": counter_evidence,
             "deep_research": deep_research,

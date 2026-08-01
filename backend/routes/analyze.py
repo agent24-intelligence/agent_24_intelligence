@@ -53,10 +53,17 @@ async def _run_preflight(topic: str) -> InputPreflightResult:
         result = await preflight_agents.preflight(topic)
         if result.status == "rejected":
             result.resolved_topic = ""
-            result.message = "추천 검색어가 없어요. 검색어를 다시 확인해 주세요."
+            result.message = "검색어를 다시 확인해 주세요."
             result.recommendations = []
-        elif not result.resolved_topic.strip() or not result.recommendations:
-            raise ValueError("rejected가 아닌 입력에는 분석 주제와 추천 검색어가 필요합니다.")
+        else:
+            # 모델이 지시를 안 지켜서 resolved_topic/recommendations를 비워 반환하는
+            # 경우가 실제로 있다. 이건 전체 요청을 503으로 죽일 만큼 치명적인 상황이
+            # 아니라서(원본 입력으로 대체하거나 추천 없이도 진행 가능), 예외를 던지는
+            # 대신 여기서 바로 복구한다.
+            if not result.resolved_topic.strip():
+                result.resolved_topic = topic
+            if not result.recommendations:
+                result.recommendations = []
     except Exception as exc:
         emit_event(
             "error",

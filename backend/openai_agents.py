@@ -62,6 +62,13 @@ class GapCandidateResult(BaseModel):
     ]
     should_deep_research: bool
     rationale: str
+    # rationale 한 문단만으로는 사용자가 "무엇이 연결되고 무엇이 안 됐는지" 파악하기 어렵다는
+    # 피드백이 있어서, 갭 판정 근거를 세 갈래로 구조화해서 같이 받는다. 각 항목은 근거로 쓴
+    # 논문/산업 자료를 구체적으로 지칭하는 한두 문장이어야 하며, 비어 있어도 된다(해당 사항이
+    # 없을 수 있음).
+    connected_points: list[str] = Field(default_factory=list, max_length=5)
+    gap_points: list[str] = Field(default_factory=list, max_length=5)
+    potential_points: list[str] = Field(default_factory=list, max_length=5)
 
 
 class ResearchAgents:
@@ -92,10 +99,18 @@ class ResearchAgents:
                 "auto_corrected로 분류하고 resolved_topic에 올바른 주제를 쓴다. 예: "
                 "'거댜언어모델' → '거대 언어 모델'. 애매한 전문용어를 임의로 만들어내거나 "
                 "의미를 확장하지 않는다.\n"
+                "입력이 기술명이 아니라 '학생 리포트 표절을 자동으로 잡아주는 서비스', "
+                "'고객 문의를 대신 응대해주는 챗봇'처럼 산업 아이디어·제품 설명·해결하고 싶은 "
+                "문제 상황으로 서술형으로 들어오는 경우도 있다. 이때도 오타 보정과 똑같이 "
+                "auto_corrected로 분류하고, resolved_topic에는 그 아이디어의 밑바탕이 되는 "
+                "구체적인 기술/방법론 이름을 추출해서 쓴다. 예: '학생 리포트 표절을 자동으로 "
+                "잡아주는 서비스' → resolved_topic '텍스트 표절 탐지(plagiarism detection)'. "
+                "밑바탕 기술을 특정할 수 없을 만큼 모호한 아이디어는 needs_calibration으로 "
+                "분류하고 후보가 될 만한 기술명들을 recommendations로 제시한다.\n"
                 "복구할 수 없는 오타, 무의미한 문자열, 말이 안 되는 문장, 확인할 수 없는 "
                 "허구적 전제는 rejected로 분류한다. 이때 resolved_topic은 빈 문자열, "
-                "recommendations는 빈 배열로 반환하고 message는 반드시 '추천 검색어가 없어요. "
-                "검색어를 다시 확인해 주세요.'로 작성한다. 이 문구는 rejected 전용이다.\n"
+                "recommendations는 빈 배열로 반환하고 message는 반드시 '검색어를 다시 확인해 "
+                "주세요.'로 작성한다. 이 문구는 rejected 전용이다.\n"
                 "실제 기술·연구 주제지만 너무 넓거나 좁거나 구체화가 필요한 경우에는 "
                 "needs_calibration으로 분류한다. 명확한 주제인 ready와 자동 보정한 "
                 "auto_corrected도 포함해 rejected가 아닌 모든 상태에서 사용자가 선택할 수 "
@@ -150,7 +165,18 @@ class ResearchAgents:
                 "학술 검색 결과와 산업 검색 결과를 대조해 적용 갭 후보를 판정한다. "
                 "연구 성숙도, 산업 도입 증거, 검색 커버리지를 분리해서 평가하고, "
                 "근거가 부족하면 억지로 gap_candidate를 만들지 않는다. "
-                "should_deep_research는 근거 부족, 모순, 고임팩트 저확신일 때만 true로 한다."
+                "should_deep_research는 근거 부족, 모순, 고임팩트 저확신일 때만 true로 한다.\n"
+                "rationale과 별개로, 판정 근거를 세 리스트로도 나눠서 준다 (각 항목은 어떤 "
+                "논문/산업 자료를 근거로 했는지 구체적으로 알 수 있게 한두 문장으로, 최대 5개씩):\n"
+                "- connected_points: 학술 근거와 산업 근거가 실제로 서로 맞아떨어지는 지점. "
+                "예: '논문 X의 양자화 기법이 산업 사례 Y에서 그대로 채택됨'.\n"
+                "- gap_points: 학술 쪽엔 있지만 산업 검색 결과에서 대응하는 사례를 못 찾은 "
+                "지점 — 이게 진짜 '갭'이다. 예: '논문 X가 제안한 방법은 학술적으로는 성숙하지만 "
+                "산업 검색 결과 중 이를 프로덕션에 적용했다는 사례가 없음'.\n"
+                "- potential_points: 지금은 직접적인 연결 근거가 없지만, 인접 사례나 산업 "
+                "동향으로 볼 때 향후 연결될 가능성이 있어 보이는 지점. 예: '산업 근거 Z가 "
+                "인접 기술을 도입하고 있어 이 기법도 확장 적용될 여지가 있음'.\n"
+                "확실한 근거가 없으면 억지로 채우지 말고 그 리스트를 비워둔다."
             ),
             output_type=GapCandidateResult,
         )
