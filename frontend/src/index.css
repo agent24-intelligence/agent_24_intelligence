@@ -6,35 +6,37 @@
      강조를 준다. "포인트 컬러"도 흰색 하나로 처리 — 연구-산업 "격차 분석" 도구라는
      정체성에 맞춰 장식색 없이 대비로만 위계를 준다. [data-theme='light']에서
      같은 원칙을 라이트로 뒤집는다 — 토글은 UserView의 테마 버튼으로 전환. */
-  --bg: #141416;
-  --surface: #1e1f22;
-  --surface-2: #1a1b1e;
-  --border: #2a2b2e;
-  --text: #f4f4f2;
-  --text-muted: #8a8b90;
+  /* 첫 다크 버전은 bg/surface/border 명도 차이가 10~15 정도로 너무 좁아서
+     카드 경계·테두리·옅은 톤이 서로 묻혀 보였다 — 단계 사이 간격을 크게 벌림. */
+  --bg: #101012;
+  --surface: #202126;
+  --surface-2: #17181b;
+  --border: #3a3b42;
+  --text: #f5f5f3;
+  --text-muted: #9ea0a6;
 
-  --accent: #f4f4f2;
+  --accent: #f5f5f3;
   --accent-2: #ffffff;
-  --accent-soft: #232427;
-  --accent-glow: rgba(244, 244, 242, 0.14);
+  --accent-soft: #2b2c32;
+  --accent-glow: rgba(245, 245, 243, 0.16);
 
   /* 기능적 상태색 (브랜드 포인트와 별개, 관용적 의미로만 최소 사용) — 다크 배경에서도
-     충분한 대비가 나오도록 밝은 톤으로 조정 */
-  --red: #e2726c;
-  --red-soft: #2a1614;
-  --green: #8ec9a0;
-  --green-soft: #16231a;
-  --amber: #e0a458;
-  --amber-soft: #241c10;
-  --slate: #8a8b90;
-  --slate-soft: #232427;
+     충분한 대비가 나오도록 밝은 톤으로 조정, soft 배경도 카드가 묻히지 않게 밝힘 */
+  --red: #ec9591;
+  --red-soft: #3d211d;
+  --green: #9ed4ae;
+  --green-soft: #1f3427;
+  --amber: #eab06c;
+  --amber-soft: #3c2c13;
+  --slate: #9ea0a6;
+  --slate-soft: #2b2c32;
 
   /* 코드 안에 하드코딩돼 있던 라이트 전용 색들도 테마 토큰으로 뽑아서
      다크/라이트 전환에 같이 따라오게 함 */
-  --score-low: #55565b;
-  --error-border: #4a2420;
-  --stop-hover-bg: #ec8983;
-  --dev-hover-bg: #2c2d31;
+  --score-low: #6f7076;
+  --error-border: #5a322b;
+  --stop-hover-bg: #f2a09c;
+  --dev-hover-bg: #35363c;
   --logo-invert: 1;
 
   --mono: ui-monospace, 'SF Mono', Consolas, monospace;
