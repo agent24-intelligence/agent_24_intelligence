@@ -62,65 +62,97 @@
   width: min(90%, 920px);
   margin: 0 auto;
   padding: 88px 24px 72px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
 }
 
-.fast-mode-toggle {
-  position: fixed;
-  top: 18px;
-  right: 18px;
-  z-index: 10;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  color: var(--text-muted);
-  background: color-mix(in srgb, var(--surface) 90%, transparent);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  font-size: 11.5px;
-  font-weight: 700;
-  letter-spacing: 0.15px;
-  backdrop-filter: blur(10px);
-  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+/* 결과가 아직 없는 첫 화면(입력 전/타이핑 중)에서는 화면 세로 중앙에 오게 하고,
+   제출해서 진행/결과가 생기는 순간부터는 위에서부터 쌓이는 일반 흐름으로 되돌린다.
+   그래야 결과가 길어져도 어색하게 재정렬되지 않는다. */
+.user-view.is-idle {
+  justify-content: center;
+  padding-top: 24px;
+  padding-bottom: 24px;
 }
 
-.fast-mode-toggle:hover:not(:disabled) {
-  color: var(--text);
-  border-color: var(--text-muted);
-  transform: translateY(-1px);
+.user-view-fast-wrap {
+  position: relative;
+  flex-shrink: 0;
 }
 
-.fast-mode-toggle.is-on {
-  color: #fff;
+/* 버튼 누르면 위에 잠깐 떴다 사라지는 상태 메시지 — 1.6초 동안 살짝 페이드
+   인/아웃하고, 그 직후 JS 타이머가 DOM에서 완전히 제거한다. */
+.user-view-fast-toast {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 8px;
+  white-space: nowrap;
   background: var(--text);
-  border-color: var(--text);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 7px;
+  pointer-events: none;
+  animation: toast-inout 1.6s ease both;
 }
 
-.fast-mode-toggle:disabled {
+@keyframes toast-inout {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(3px);
+  }
+  15%,
+  85% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-3px);
+  }
+}
+
+/* 빠른 모드 — 폼 안 다른 아이콘 버튼과 같은 크기/모양의 고스트 버튼.
+   꺼짐: 테두리만 있는 무채색(거의 눈에 안 띔). 켜짐: 제출 버튼과 같은 검정 채움으로
+   "지금 적용 중"이라는 걸 확실히 드러낸다. */
+.user-view-fast-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 12px;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.user-view-fast-btn:hover:not(:disabled) {
+  border-color: var(--text-muted);
+  color: var(--text);
+}
+
+.user-view-fast-btn.is-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.user-view-fast-btn.is-on:hover:not(:disabled) {
+  background: var(--accent-2);
+  border-color: var(--accent-2);
+}
+
+.user-view-fast-btn:disabled {
+  opacity: 0.45;
   cursor: default;
-  opacity: 0.5;
-}
-
-.fast-mode-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: currentColor;
-  opacity: 0.35;
-}
-
-.fast-mode-toggle.is-on .fast-mode-dot {
-  background: #8ee6a8;
-  opacity: 1;
-  box-shadow: 0 0 0 3px rgb(142 230 168 / 18%);
-}
-
-.fast-mode-state {
-  min-width: 24px;
-  color: inherit;
-  font-size: 9px;
-  letter-spacing: 0.6px;
-  opacity: 0.65;
 }
 
 .user-view-intro {
@@ -162,10 +194,10 @@
 .user-view-intro h1 {
   position: relative;
   z-index: 1;
-  font-family: 'Archivo Black', 'Pretendard Variable', sans-serif;
-  font-size: 42px;
-  font-weight: 400;
-  letter-spacing: -0.8px;
+  font-family: 'Sora', 'Pretendard Variable', sans-serif;
+  font-size: 48px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
   margin: 0;
   color: var(--text);
 }

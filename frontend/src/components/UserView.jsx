@@ -107,6 +107,15 @@ function WarningIcon() {
   )
 }
 
+// 빠른 모드 토글 아이콘 — 별도 라벨/스위치 대신 입력창 옆 아이콘 버튼 하나로 축소.
+function BoltIcon() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="13 2 4 14 11 14 10 22 20 10 13 10 13 2" />
+    </svg>
+  )
+}
+
 // result.scholar = { totalCount, results: [...], searches: [...] } — 학술 검색으로 찾은
 // 논문 목록. 항목마다 title/url/citationCount 등이 있을 수도 없을 수도 있어 방어적으로 읽는다.
 function scholarItems(result) {
@@ -251,6 +260,9 @@ export default function UserView() {
   const [topicExample] = useState(() => TOPIC_EXAMPLES[Math.floor(Math.random() * TOPIC_EXAMPLES.length)])
   const [topic, setTopic] = useState('')
   const [fastMode, setFastMode] = useState(false)
+  const [fastModeNotice, setFastModeNotice] = useState(null) // 빠른 모드 버튼 누르면 잠깐 떴다 사라지는 상태 메시지
+  const [fastModeNoticeKey, setFastModeNoticeKey] = useState(0) // 연속 클릭 시 애니메이션을 처음부터 다시 재생시키기 위한 키
+  const fastModeNoticeTimer = useRef(null)
   const [status, setStatus] = useState('idle') // idle | running | done | error
   const [stage, setStage] = useState(null)
   const [result, setResult] = useState(null)
@@ -412,22 +424,7 @@ export default function UserView() {
   const showScrollTop = useScrollPastTop()
 
   return (
-    <div className="user-view">
-      <button
-        type="button"
-        className={`fast-mode-toggle ${fastMode ? 'is-on' : ''}`}
-        onClick={() => {
-          setFastMode((value) => !value)
-          setLastAnalyzedTopic(null)
-        }}
-        aria-pressed={fastMode}
-        disabled={status === 'running'}
-        title={fastMode ? '단계별 시간 제한을 적용합니다' : '시간 제한 없이 전체 분석을 실행합니다'}
-      >
-        <span className="fast-mode-dot" />
-        <span>Fast mode</span>
-        <span className="fast-mode-state">{fastMode ? 'ON' : 'OFF'}</span>
-      </button>
+    <div className={`user-view${status === 'idle' ? ' is-idle' : ''}`}>
       {showScrollTop && (
         <button
           type="button"
@@ -451,6 +448,38 @@ export default function UserView() {
       </div>
 
       <form className="user-view-form" onSubmit={runAnalyze}>
+        {/* 별도 줄/라벨/스위치 대신 입력창 옆 아이콘 버튼 하나로 — 폼의 일부처럼 보이게
+            해서 "설정 UI"가 튀지 않고 다른 아이콘 버튼들과 같은 언어로 자리잡게 한다. */}
+        <div className="user-view-fast-wrap">
+          {/* key를 매번 바꿔서 연속으로 빠르게 눌러도 DOM이 새로 마운트되고 애니메이션이
+              처음부터 재생되게 한다 — 텍스트만 바뀌면 이미 진행 중인 CSS 애니메이션이
+              재시작되지 않아 클릭 속도를 못 따라오는 문제가 있었다. */}
+          {fastModeNotice && (
+            <div key={fastModeNoticeKey} className="user-view-fast-toast">
+              {fastModeNotice}
+            </div>
+          )}
+          <button
+            type="button"
+            className={`user-view-fast-btn ${fastMode ? 'is-on' : ''}`}
+            onClick={() => {
+              setFastMode((value) => {
+                const next = !value
+                setFastModeNotice(next ? '빠른 모드 켜짐' : '빠른 모드 꺼짐')
+                setFastModeNoticeKey((k) => k + 1)
+                clearTimeout(fastModeNoticeTimer.current)
+                fastModeNoticeTimer.current = setTimeout(() => setFastModeNotice(null), 1600)
+                return next
+              })
+              setLastAnalyzedTopic(null)
+            }}
+            aria-pressed={fastMode}
+            disabled={status === 'running'}
+            title={fastMode ? '빠른 모드 켜짐 — 단계별 시간 제한 적용' : '빠른 모드 꺼짐 — 시간 제한 없이 전체 분석'}
+          >
+            <BoltIcon />
+          </button>
+        </div>
         <input
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
