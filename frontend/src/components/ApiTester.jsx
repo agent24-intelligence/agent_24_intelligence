@@ -2,6 +2,18 @@ import { useState } from 'react'
 
 const DEFAULT_BODY = '{\n  \n}'
 
+async function readJsonOrText(res) {
+  const text = await res.text()
+  if (!text.trim()) {
+    return { error: 'empty_response', status: res.status }
+  }
+  try {
+    return JSON.parse(text)
+  } catch (err) {
+    return { error: `응답 JSON 파싱 실패: ${err.message}`, status: res.status, body: text }
+  }
+}
+
 export default function ApiTester() {
   const [analyzeTopic, setAnalyzeTopic] = useState('온디바이스 sLLM 양자화')
   const [analyzeStatus, setAnalyzeStatus] = useState('')
@@ -32,7 +44,7 @@ export default function ApiTester() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ method, path, json }),
       })
-      const data = await res.json()
+      const data = await readJsonOrText(res)
       setResult(data)
     } catch (err) {
       setResult({ error: String(err) })
@@ -62,7 +74,7 @@ export default function ApiTester() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ topic: analyzeTopic, max_results: 10 }),
       })
-      const data = await res.json()
+      const data = await readJsonOrText(res)
       setAnalyzeResult(data)
       setAnalyzeStatus(res.ok ? '완료됨 — Raw API Stream 패널에서 단계별 이벤트 확인' : `실패 (${res.status})`)
     } catch (err) {
