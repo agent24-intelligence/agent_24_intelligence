@@ -41,7 +41,6 @@
   background: var(--surface);
   border: 1px solid var(--border);
   color: var(--text);
-  box-shadow: var(--shadow-lg);
   opacity: 0.85;
   z-index: 5;
   animation: rise-in 0.2s ease both;
@@ -61,22 +60,6 @@
   max-width: 720px;
   margin: 0 auto;
   padding: 88px 24px 72px;
-  position: relative;
-}
-
-/* 무채색 그라디언트 — 색 없이도 히어로 영역에 입체감을 준다 */
-.user-view::before {
-  content: '';
-  position: absolute;
-  top: -40px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 900px;
-  max-width: 140vw;
-  height: 420px;
-  background: radial-gradient(ellipse at 50% 0%, rgba(0, 0, 0, 0.06), transparent 65%);
-  pointer-events: none;
-  z-index: -1;
 }
 
 .user-view-intro {
@@ -163,7 +146,6 @@
   border-radius: 12px;
   padding: 13px 18px;
   font-size: 14.5px;
-  box-shadow: var(--shadow);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -292,7 +274,6 @@
   border-radius: var(--radius);
   padding: 18px 16px 16px;
   text-align: center;
-  box-shadow: var(--shadow);
 }
 
 .score-label {
@@ -361,7 +342,6 @@
 
 .user-view-result .gap-map-frame {
   width: 100%;
-  box-shadow: var(--shadow);
 }
 
 .app-header {
@@ -371,7 +351,6 @@
   padding: 14px 24px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
-  box-shadow: var(--shadow);
   position: relative;
   z-index: 1;
 }
@@ -662,16 +641,19 @@ main {
   flex: 1;
   padding: 24px;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .api-tester-section {
+  width: 100%;
   max-width: 640px;
   margin-bottom: 24px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 20px 22px;
-  box-shadow: var(--shadow);
 }
 
 .api-tester-section h3 {
@@ -789,7 +771,6 @@ main {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: #fff;
-  box-shadow: var(--shadow);
 }
 
 .gap-map-refs {
