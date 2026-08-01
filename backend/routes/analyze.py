@@ -41,6 +41,51 @@ class PreflightFailure(RuntimeError):
     """The cheap input gate failed, so the expensive pipeline must not run."""
 
 
+_BROAD_TOPIC_RECOMMENDATIONS = [
+    (
+        {"ai", "인공지능", "artificial intelligence"},
+        ["LLM 환각(hallucination) 탐지", "온디바이스 sLLM 양자화", "의료 영상 이상 탐지"],
+    ),
+    (
+        {"llm", "large language model", "large language models", "거대 언어 모델", "거대언어모델", "대규모 언어 모델", "대규모언어모델"},
+        ["LLM 환각(hallucination) 탐지", "온디바이스 sLLM 양자화", "LLM 프롬프트 인젝션 탐지"],
+    ),
+    (
+        {"rag", "retrieval augmented generation", "retrieval-augmented generation"},
+        ["RAG 파이프라인 캐싱 전략", "RAG 검색 결과 재랭킹", "멀티홉 RAG 질의 분해"],
+    ),
+    (
+        {"gnn", "graph neural network", "graph neural networks", "그래프 신경망", "그래프 뉴럴넷"},
+        ["GNN 기반 제품 추천 시스템", "GNN 기반 사기 거래 탐지", "지식 그래프 기반 링크 예측"],
+    ),
+    (
+        {"diffusion model", "diffusion models", "확산 모델", "확산모델"},
+        ["확산 모델 기반 영상 복원 기법", "확산 모델 기반 의료 영상 초해상도", "확산 모델 샘플링 가속 기법"],
+    ),
+]
+
+
+def _normalize_topic_for_gate(value: str) -> str:
+    normalized = value.casefold().strip()
+    normalized = normalized.replace("(", " ").replace(")", " ").replace("-", " ")
+    return " ".join(normalized.split())
+
+
+def _calibrate_broad_resolved_topic(result: InputPreflightResult) -> InputPreflightResult:
+    """Catch broad topics even when the model first corrected a typo."""
+    if result.status == "rejected":
+        return result
+    resolved = _normalize_topic_for_gate(result.resolved_topic or result.original_topic)
+    for aliases, recommendations in _BROAD_TOPIC_RECOMMENDATIONS:
+        if resolved in aliases:
+            result.status = "needs_calibration"
+            result.reason_code = "too_broad"
+            result.message = "입력하신 주제는 범위가 넓어요. 아래 추천 중 하나를 선택하거나 더 구체적으로 입력해 주세요."
+            result.recommendations = recommendations
+            return result
+    return result
+
+
 async def _run_preflight(topic: str, runtime: RuntimeConfig = RUNTIME) -> InputPreflightResult:
     emit_event(
         "note",
@@ -64,6 +109,7 @@ async def _run_preflight(topic: str, runtime: RuntimeConfig = RUNTIME) -> InputP
                 result.resolved_topic = topic
             if not result.recommendations:
                 result.recommendations = []
+            result = _calibrate_broad_resolved_topic(result)
     except AgentBudgetTimeout:
         emit_event(
             "note",
