@@ -79,6 +79,51 @@ function WarningIcon() {
   )
 }
 
+// result.scholar = { totalCount, results: [...], searches: [...] } — 학술 검색으로 찾은
+// 논문 목록. 항목마다 title/url/citationCount 등이 있을 수도 없을 수도 있어 방어적으로 읽는다.
+function scholarItems(result) {
+  return Array.isArray(result?.scholar?.results) ? result.scholar.results : []
+}
+
+// result.adoption은 쿼리별 응답 객체의 배열이라(각각 { results: [...] }), 평탄화해서
+// 하나의 목록으로 만든다.
+function adoptionItems(result) {
+  if (!Array.isArray(result?.adoption)) return []
+  return result.adoption.flatMap((resp) => (Array.isArray(resp?.results) ? resp.results : []))
+}
+
+// 검색엔진 결과처럼 링크 밑에 출처 도메인을 보여주기 위한 호스트명 추출.
+function hostnameOf(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return null
+  }
+}
+
+// 검색엔진 결과 카드처럼: 제목(링크) → 출처 도메인 → 스니펫(요약) 순서로 보여준다.
+function EvidenceItem({ item, showCitation }) {
+  const hostname = item.url ? hostnameOf(item.url) : null
+  return (
+    <li className="evidence-item">
+      <div className="evidence-item-head">
+        {item.url ? (
+          <a href={item.url} target="_blank" rel="noreferrer">
+            {item.title || item.url}
+          </a>
+        ) : (
+          <span className="evidence-item-title">{item.title || '제목 없음'}</span>
+        )}
+        {showCitation && typeof item.citationCount === 'number' && (
+          <span className="evidence-meta">인용 {item.citationCount}회</span>
+        )}
+      </div>
+      {hostname && <div className="evidence-item-source">{hostname}</div>}
+      {item.snippet && <p className="evidence-item-snippet">{item.snippet}</p>}
+    </li>
+  )
+}
+
 // 결과가 길어져서 아래로 많이 스크롤됐을 때만 "맨 위로" 버튼을 보여준다.
 function useScrollPastTop(threshold = 400) {
   const [past, setPast] = useState(false)
@@ -101,6 +146,9 @@ export default function UserView() {
   const [artifact, setArtifact] = useState(null)
   const [errorMsg, setErrorMsg] = useState(null)
   const [liveSuggestions, setLiveSuggestions] = useState([])
+  const [showLinerWidget, setShowLinerWidget] = useState(false)
+  const [showAllEvidence, setShowAllEvidence] = useState({ scholar: false, adoption: false })
+  const [searchNote, setSearchNote] = useState(null) // { mode, query } — 지금 이 순간 실제로 던지고 있는 검색어
   const disconnectRef = useRef(null)
   const abortRef = useRef(null)
   const suggestAbortRef = useRef(null)
@@ -108,6 +156,13 @@ export default function UserView() {
   useEffect(() => {
     disconnectRef.current = connectStream((event) => {
       if (event.stage) setStage(event.stage)
+      // 검색어 문구는 단계가 바뀌어도 지우지 않고 마지막 값을 그대로 둔다 — "결과 정리하는
+      // 중" 같은 뒷 단계에서도 방금 어떤 검색어로 찾았는지 맥락이 이어져 보이게.
+      // (event.payload.body.query가 빈 문자열이면 이 조건 자체가 false라 절대 '' 그대로
+      // 보여주는 일은 없다.)
+      if (event.type === 'tool_call' && event.payload?.name === 'search' && event.payload?.body?.query) {
+        setSearchNote({ mode: event.payload.mode, query: event.payload.body.query })
+      }
       if (event.type === 'data-atlas') {
         const atlas = event.payload?.data?.atlasArtifact ?? event.payload?.atlasArtifact
         if (atlas?.html) setArtifact(atlas)
@@ -155,7 +210,10 @@ export default function UserView() {
     setArtifact(null)
     setErrorMsg(null)
     setStage(null)
+    setSearchNote(null)
     setLiveSuggestions([])
+    setShowLinerWidget(false)
+    setShowAllEvidence({ scholar: false, adoption: false })
 
     const controller = new AbortController()
     abortRef.current = controller
@@ -276,7 +334,7 @@ export default function UserView() {
 
       {status === 'idle' && liveSuggestions.length > 0 && (
         <div className="user-view-live-suggestions">
-          <span className="live-suggestions-label">이런 주제는 어떠세요?</span>
+          <span className="live-suggestions-label">추천 검색어</span>
           <div className="user-view-suggestions">
             {liveSuggestions.map((rec) => (
               <button key={rec} type="button" className="suggestion-chip" onClick={() => applySuggestion(rec)}>
@@ -289,8 +347,13 @@ export default function UserView() {
 
       {status === 'running' && (
         <div className="user-view-progress">
-          <span className="spinner" />
-          {stage ? STAGE_LABEL[stage] || stage : '준비하는 중'}
+          <div className="progress-main-row">
+            <span className="spinner" />
+            <span>{stage ? STAGE_LABEL[stage] || stage : '준비하는 중'}</span>
+          </div>
+          {/* 검색엔진처럼 지금 실제로 뭘 검색 중인지 보여준다 — 추상적인 단계 이름보다
+              구체적인 검색어를 보여주는 게 "돌아가고 있다"는 신뢰를 훨씬 잘 줌 */}
+          {searchNote && <div className="progress-search-note">‘{searchNote.query}’로 검색하겠습니다</div>}
         </div>
       )}
 
@@ -350,16 +413,85 @@ export default function UserView() {
               <span className="score-value">{result.scores?.adoption_evidence ?? '-'}</span>
             </div>
             <div className="score-card">
-              <span className="score-label">얼마나 꼼꼼히 찾아봤나</span>
+              <span className="score-label">판정 신뢰도</span>
               <span className="score-value">{result.scores?.coverage_confidence ?? '-'}</span>
             </div>
           </div>
 
           {result.rationale && <p className="user-view-rationale">{result.rationale}</p>}
 
+          {(() => {
+            const EVIDENCE_SHOWN = 5
+            const scholar = scholarItems(result)
+            const adoption = adoptionItems(result)
+            if (scholar.length === 0 && adoption.length === 0) return null
+            return (
+              <div className="user-view-evidence">
+                {scholar.length > 0 && (
+                  <div className="evidence-group">
+                    <h3 className="evidence-group-title">
+                      찾은 학술 근거 {showAllEvidence.scholar || scholar.length <= EVIDENCE_SHOWN
+                        ? `(${scholar.length}개)`
+                        : `(총 ${scholar.length}개 중 상위 ${EVIDENCE_SHOWN}개)`}
+                    </h3>
+                    <ul className="evidence-list">
+                      {scholar.slice(0, showAllEvidence.scholar ? scholar.length : EVIDENCE_SHOWN).map((item, i) => (
+                        <EvidenceItem key={item.url || item.title || i} item={item} showCitation />
+                      ))}
+                    </ul>
+                    {scholar.length > EVIDENCE_SHOWN && (
+                      <button
+                        type="button"
+                        className="evidence-more-btn"
+                        onClick={() => setShowAllEvidence((v) => ({ ...v, scholar: !v.scholar }))}
+                      >
+                        {showAllEvidence.scholar ? '접기' : `나머지 ${scholar.length - EVIDENCE_SHOWN}개 더 보기`}
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {adoption.length > 0 && (
+                  <div className="evidence-group">
+                    <h3 className="evidence-group-title">
+                      찾은 산업 도입 근거 {showAllEvidence.adoption || adoption.length <= EVIDENCE_SHOWN
+                        ? `(${adoption.length}개)`
+                        : `(총 ${adoption.length}개 중 상위 ${EVIDENCE_SHOWN}개)`}
+                    </h3>
+                    <ul className="evidence-list">
+                      {adoption.slice(0, showAllEvidence.adoption ? adoption.length : EVIDENCE_SHOWN).map((item, i) => (
+                        <EvidenceItem key={item.url || item.title || i} item={item} />
+                      ))}
+                    </ul>
+                    {adoption.length > EVIDENCE_SHOWN && (
+                      <button
+                        type="button"
+                        className="evidence-more-btn"
+                        onClick={() => setShowAllEvidence((v) => ({ ...v, adoption: !v.adoption }))}
+                      >
+                        {showAllEvidence.adoption ? '접기' : `나머지 ${adoption.length - EVIDENCE_SHOWN}개 더 보기`}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+
           {artifact?.html && (
+            <div className="user-view-liner-toggle">
+              <button
+                type="button"
+                className="liner-toggle-btn"
+                onClick={() => setShowLinerWidget((v) => !v)}
+              >
+                {showLinerWidget ? 'Liner 원본 시각화 접기' : 'Liner 원본 시각화 보기'}
+              </button>
+            </div>
+          )}
+
+          {artifact?.html && showLinerWidget && (
             <>
-              <div className="gap-map-caption">OpenAI 판정 결과를 Liner Visualization으로 최종 표현</div>
               {/* 안쪽에 별도 스크롤바가 생기지 않도록, 로드되면 내용 높이만큼 iframe 자체 높이를 늘려서
                   스크롤이 페이지 하나로만 일어나게 한다. */}
               <iframe
