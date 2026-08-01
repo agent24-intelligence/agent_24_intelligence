@@ -1,0 +1,235 @@
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  border-bottom: 1px solid #262832;
+  background: #111219;
+}
+
+.app-title {
+  font-weight: 600;
+  color: #f3f4f6;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.tabs button {
+  background: transparent;
+  border: 1px solid #2e303a;
+  color: #9ca3af;
+  padding: 6px 12px;
+  border-radius: 6px;
+}
+
+.tabs button.active {
+  color: #fff;
+  border-color: #6366f1;
+  background: rgba(99, 102, 241, 0.15);
+}
+
+.clean-link {
+  margin-left: auto;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* -- Raw API Stream -- */
+
+.raw-stream {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.app-clean .raw-stream {
+  height: 100vh;
+}
+
+.raw-stream-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #262832;
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #6b7280;
+}
+
+.status-dot.status-connected {
+  background: #22c55e;
+}
+
+.status-dot.status-error {
+  background: #ef4444;
+}
+
+.follow-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.raw-stream-toolbar button {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid #2e303a;
+  color: #9ca3af;
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+
+.raw-stream-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+}
+
+.empty-hint {
+  color: #4b5563;
+  padding: 24px 0;
+  text-align: center;
+}
+
+.event-line {
+  border-bottom: 1px solid #1c1e26;
+  padding: 6px 0;
+}
+
+.event-line-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.event-time {
+  color: #6b7280;
+}
+
+.event-stage,
+.event-source {
+  color: #9ca3af;
+  border: 1px solid #2e303a;
+  border-radius: 4px;
+  padding: 0 6px;
+}
+
+.event-type {
+  color: #0b0c10;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 0 6px;
+}
+
+.event-payload {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #d1d5db;
+  font-size: 13px;
+}
+
+/* -- API tester -- */
+
+.api-tester {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.api-tester-section {
+  max-width: 640px;
+  margin-bottom: 28px;
+}
+
+.api-tester-section h3 {
+  margin: 0 0 4px;
+  color: #f3f4f6;
+}
+
+.hint {
+  color: #6b7280;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+.form-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.form-row input {
+  flex: 1;
+}
+
+.api-tester input,
+.api-tester select,
+.api-tester textarea {
+  background: #111219;
+  border: 1px solid #2e303a;
+  color: #e5e7eb;
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.api-tester textarea {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.api-tester button {
+  background: #6366f1;
+  border: none;
+  color: #fff;
+  padding: 6px 14px;
+  border-radius: 6px;
+}
+
+.api-tester button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.demo-status {
+  margin-top: 8px;
+  color: #9ca3af;
+  font-size: 13px;
+}
+
+.result-box {
+  margin-top: 12px;
+  background: #111219;
+  border: 1px solid #2e303a;
+  border-radius: 6px;
+  padding: 10px;
+  max-height: 400px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
