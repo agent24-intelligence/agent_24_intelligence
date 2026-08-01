@@ -124,6 +124,55 @@ function EvidenceItem({ item, showCitation }) {
   )
 }
 
+// 갭 판정 근거를 세 갈래로 나눠 보여준다 — "그냥 링크 목록"이 아니라 "무엇이 연결됐고,
+// 무엇이 안 됐고(진짜 갭), 무엇이 더 연결될 여지가 있는지" 사용자가 바로 알 수 있게.
+function ConnectionGroup({ tone, title, items }) {
+  return (
+    <div className={`connection-group tone-${tone}`}>
+      <h3 className="connection-group-title">{title}</h3>
+      <ul className="connection-list">
+        {items.map((text, i) => (
+          <li key={i}>{text}</li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+const EVIDENCE_PAGE_SIZE = 5
+
+// 학술/산업 근거 목록을 5개씩 페이지로 끊어서 보여준다. "나머지 다 보기"로 한 번에
+// 왕창 펼치는 대신, 필요한 사람만 다음 페이지로 넘겨보게 해서 화면이 갑자기 안 길어짐.
+function EvidenceGroup({ title, items, showCitation, page, onPageChange }) {
+  const totalPages = Math.ceil(items.length / EVIDENCE_PAGE_SIZE)
+  const pageItems = items.slice(page * EVIDENCE_PAGE_SIZE, (page + 1) * EVIDENCE_PAGE_SIZE)
+  return (
+    <div className="evidence-group">
+      <h3 className="evidence-group-title">
+        {title} ({items.length}개)
+      </h3>
+      <ul className="evidence-list">
+        {pageItems.map((item, i) => (
+          <EvidenceItem key={item.url || item.title || i} item={item} showCitation={showCitation} />
+        ))}
+      </ul>
+      {totalPages > 1 && (
+        <div className="evidence-pager">
+          <button type="button" disabled={page === 0} onClick={() => onPageChange(page - 1)}>
+            이전
+          </button>
+          <span className="evidence-pager-status">
+            {page + 1} / {totalPages}
+          </span>
+          <button type="button" disabled={page >= totalPages - 1} onClick={() => onPageChange(page + 1)}>
+            다음
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // 결과가 길어져서 아래로 많이 스크롤됐을 때만 "맨 위로" 버튼을 보여준다.
 function useScrollPastTop(threshold = 400) {
   const [past, setPast] = useState(false)
@@ -145,8 +194,10 @@ export default function UserView() {
   const [result, setResult] = useState(null)
   const [errorMsg, setErrorMsg] = useState(null)
   const [liveSuggestions, setLiveSuggestions] = useState([])
-  const [showAllEvidence, setShowAllEvidence] = useState({ scholar: false, adoption: false })
+  const [liveGuidance, setLiveGuidance] = useState(null) // 추천이 하나도 없을 때(rejected) 보여줄 안내 문구
+  const [evidencePage, setEvidencePage] = useState({ scholar: 0, adoption: 0 })
   const [searchNote, setSearchNote] = useState(null) // { mode, query } — 지금 이 순간 실제로 던지고 있는 검색어
+  const [lastAnalyzedTopic, setLastAnalyzedTopic] = useState(null) // 직전에 실제로 돌린 주제 — 그대로 재요청하는 걸 막는 데 씀
   const disconnectRef = useRef(null)
   const abortRef = useRef(null)
   const suggestAbortRef = useRef(null)
@@ -170,6 +221,7 @@ export default function UserView() {
   useEffect(() => {
     if (status !== 'idle' || topic.trim().length < 2) {
       setLiveSuggestions([])
+      setLiveGuidance(null)
       return
     }
 
@@ -189,7 +241,11 @@ export default function UserView() {
         // (기다리는 중 아무것도 안 쳤으면 suggestAbortRef는 여전히 이 controller를 가리키고
         // 있어서 정상적으로 반영된다 — "가만히 기다리면 안 뜰 수도 있는" 문제는 아니다.)
         if (suggestAbortRef.current === controller) {
-          setLiveSuggestions(Array.isArray(data?.recommendations) ? data.recommendations : [])
+          const recs = Array.isArray(data?.recommendations) ? data.recommendations : []
+          setLiveSuggestions(recs)
+          // 추천이 하나도 없으면 조용히 넘어가지 않고, 제출 전에도 뭐가 문제인지 미리 알려준다
+          // (버튼 눌러서 결과 화면까지 가야 알게 되는 것보다 지금 바로 아는 게 낫다는 피드백).
+          setLiveGuidance(recs.length === 0 && data?.status === 'rejected' ? data.message : null)
         }
       } catch {
         // 보조 기능이라 실패해도 조용히 무시한다 — 사용자가 그냥 계속 타이핑하면 됨.
@@ -203,6 +259,10 @@ export default function UserView() {
     e?.preventDefault()
     const topicToRun = topicOverride ?? topic
     if (!topicToRun.trim()) return
+    // 결과가 이미 떠 있는 상태에서 입력을 안 고치고 그대로 화살표를 또 누르면, 방금과
+    // 똑같은 요청을 API 비용 들여가며 한 번 더 돌리게 된다. 직전에 성공한 주제와
+    // 완전히 같으면 그냥 지금 보이는 결과를 유지하고 재요청은 건너뛴다.
+    if (status === 'done' && topicToRun.trim() === lastAnalyzedTopic) return
     if (topicOverride) setTopic(topicOverride)
     setStatus('running')
     setResult(null)
@@ -210,7 +270,8 @@ export default function UserView() {
     setStage(null)
     setSearchNote(null)
     setLiveSuggestions([])
-    setShowAllEvidence({ scholar: false, adoption: false })
+    setLiveGuidance(null)
+    setEvidencePage({ scholar: 0, adoption: 0 })
 
     const controller = new AbortController()
     abortRef.current = controller
@@ -247,6 +308,7 @@ export default function UserView() {
 
       setResult(data)
       setStatus('done')
+      setLastAnalyzedTopic(topicToRun.trim())
     } catch (err) {
       if (err.name === 'AbortError') {
         setStatus('idle')
@@ -274,6 +336,7 @@ export default function UserView() {
   function applySuggestion(rec) {
     setTopic(rec)
     setLiveSuggestions([])
+    setLiveGuidance(null)
   }
 
   const showScrollTop = useScrollPastTop()
@@ -296,7 +359,7 @@ export default function UserView() {
           Gap Radar
         </span>
         <h1>Research-to-Reality Radar</h1>
-        <p>연구 분야/기술 하나를 입력하면, 학계 연구와 산업 적용 사이의 격차를 분석합니다.</p>
+        <p>연구 분야·기술·산업 아이디어 중 하나를 입력하면, 학계 연구와 산업 적용 사이의 격차를 분석합니다.</p>
       </div>
 
       <form className="user-view-form" onSubmit={runAnalyze}>
@@ -331,9 +394,9 @@ export default function UserView() {
           <button
             type="submit"
             className="user-view-icon-btn"
-            disabled={!topic.trim()}
+            disabled={!topic.trim() || (status === 'done' && topic.trim() === lastAnalyzedTopic)}
             aria-label="분석 시작"
-            title="분석 시작"
+            title={status === 'done' && topic.trim() === lastAnalyzedTopic ? '이미 이 주제로 분석했어요' : '분석 시작'}
           >
             <ArrowIcon />
           </button>
@@ -351,6 +414,12 @@ export default function UserView() {
             ))}
           </div>
         </div>
+      )}
+
+      {/* 제출도 하기 전에 이 검색어로는 안 될 것 같다는 걸 미리 알려준다 — 버튼 눌러서
+          결과 화면까지 가야 알게 되는 것보다 지금 바로 아는 게 낫다. */}
+      {status === 'idle' && liveSuggestions.length === 0 && liveGuidance && (
+        <div className="user-view-live-guidance">{liveGuidance}</div>
       )}
 
       {status === 'running' && (
@@ -377,10 +446,10 @@ export default function UserView() {
       {status === 'done' && result && result.status !== 'completed' && (
         <div className="user-view-guidance">
           <p className="user-view-guidance-message">
-            {/* 사전 검사 모델이 추천을 만들어놓고도 rejected 전용 문구("추천 검색어가
-                없어요...")를 잘못 재사용하는 경우가 있어서, 추천이 실제로 있으면
+            {/* 사전 검사 모델이 추천을 만들어놓고도 rejected 전용 문구("검색어를 다시
+                확인해 주세요")를 잘못 재사용하는 경우가 있어서, 추천이 실제로 있으면
                 그 모순된 문구 대신 자연스러운 안내로 바꿔 보여준다. */}
-            {result.recommendations?.length > 0 && result.message?.includes('추천 검색어가 없어요')
+            {result.recommendations?.length > 0 && result.message?.includes('검색어를 다시 확인해')
               ? '입력하신 주제로 아래 추천 검색어를 만들었어요. 하나를 선택해 보세요.'
               : result.message}
           </p>
@@ -428,59 +497,64 @@ export default function UserView() {
 
           {result.rationale && <p className="user-view-rationale">{result.rationale}</p>}
 
+          {result.vocabulary?.rationale && (
+            <div className="user-view-bridge">
+              <h3 className="bridge-title">학술 용어를 산업 검색어로 이렇게 변환했습니다</h3>
+              {result.vocabulary.terms?.length > 0 && (
+                <div className="bridge-terms">
+                  {result.vocabulary.terms.map((term) => (
+                    <span key={term} className="bridge-term-chip">
+                      {term}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <p className="bridge-rationale">{result.vocabulary.rationale}</p>
+            </div>
+          )}
+
+          {(result.connected_points?.length > 0 ||
+            result.gap_points?.length > 0 ||
+            result.potential_points?.length > 0) && (
+            <div className="user-view-connections">
+              {result.connected_points?.length > 0 && (
+                <ConnectionGroup tone="connected" title="연계된 근거" items={result.connected_points} />
+              )}
+              {result.gap_points?.length > 0 && (
+                <ConnectionGroup tone="gap" title="연계 안 된 부분 — 진짜 갭" items={result.gap_points} />
+              )}
+              {result.potential_points?.length > 0 && (
+                <ConnectionGroup
+                  tone="potential"
+                  title="추가로 연계될 여지가 있는 지점"
+                  items={result.potential_points}
+                />
+              )}
+            </div>
+          )}
+
           {(() => {
-            const EVIDENCE_SHOWN = 5
             const scholar = scholarItems(result)
             const adoption = adoptionItems(result)
             if (scholar.length === 0 && adoption.length === 0) return null
             return (
               <div className="user-view-evidence">
                 {scholar.length > 0 && (
-                  <div className="evidence-group">
-                    <h3 className="evidence-group-title">
-                      찾은 학술 근거 {showAllEvidence.scholar || scholar.length <= EVIDENCE_SHOWN
-                        ? `(${scholar.length}개)`
-                        : `(총 ${scholar.length}개 중 상위 ${EVIDENCE_SHOWN}개)`}
-                    </h3>
-                    <ul className="evidence-list">
-                      {scholar.slice(0, showAllEvidence.scholar ? scholar.length : EVIDENCE_SHOWN).map((item, i) => (
-                        <EvidenceItem key={item.url || item.title || i} item={item} showCitation />
-                      ))}
-                    </ul>
-                    {scholar.length > EVIDENCE_SHOWN && (
-                      <button
-                        type="button"
-                        className="evidence-more-btn"
-                        onClick={() => setShowAllEvidence((v) => ({ ...v, scholar: !v.scholar }))}
-                      >
-                        {showAllEvidence.scholar ? '접기' : `나머지 ${scholar.length - EVIDENCE_SHOWN}개 더 보기`}
-                      </button>
-                    )}
-                  </div>
+                  <EvidenceGroup
+                    title="찾은 학술 근거"
+                    items={scholar}
+                    showCitation
+                    page={evidencePage.scholar}
+                    onPageChange={(p) => setEvidencePage((v) => ({ ...v, scholar: p }))}
+                  />
                 )}
-
                 {adoption.length > 0 && (
-                  <div className="evidence-group">
-                    <h3 className="evidence-group-title">
-                      찾은 산업 도입 근거 {showAllEvidence.adoption || adoption.length <= EVIDENCE_SHOWN
-                        ? `(${adoption.length}개)`
-                        : `(총 ${adoption.length}개 중 상위 ${EVIDENCE_SHOWN}개)`}
-                    </h3>
-                    <ul className="evidence-list">
-                      {adoption.slice(0, showAllEvidence.adoption ? adoption.length : EVIDENCE_SHOWN).map((item, i) => (
-                        <EvidenceItem key={item.url || item.title || i} item={item} />
-                      ))}
-                    </ul>
-                    {adoption.length > EVIDENCE_SHOWN && (
-                      <button
-                        type="button"
-                        className="evidence-more-btn"
-                        onClick={() => setShowAllEvidence((v) => ({ ...v, adoption: !v.adoption }))}
-                      >
-                        {showAllEvidence.adoption ? '접기' : `나머지 ${adoption.length - EVIDENCE_SHOWN}개 더 보기`}
-                      </button>
-                    )}
-                  </div>
+                  <EvidenceGroup
+                    title="찾은 산업 도입 근거"
+                    items={adoption}
+                    page={evidencePage.adoption}
+                    onPageChange={(p) => setEvidencePage((v) => ({ ...v, adoption: p }))}
+                  />
                 )}
               </div>
             )

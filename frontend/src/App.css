@@ -158,6 +158,15 @@
   font-weight: 600;
 }
 
+.user-view-live-guidance {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-top: -14px;
+  margin-bottom: 36px;
+  animation: rise-in 0.2s ease both;
+}
+
 .user-view-form input {
   flex: 1;
   background: var(--surface);
@@ -442,6 +451,107 @@
   margin: 0 0 24px;
 }
 
+/* 학술 용어 → 산업 검색어로 어떻게 연결했는지 보여주는 브릿지 노트 */
+.user-view-bridge {
+  width: 100%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 20px;
+}
+
+.bridge-title {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.bridge-terms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.bridge-term-chip {
+  background: var(--accent-soft);
+  color: var(--accent-2);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+
+.bridge-rationale {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* 갭 판정 근거 세 갈래 — 연결됨/진짜 갭/연결될 여지. 왼쪽 컬러 바로만 구분하고
+   배경은 그대로 둬서 무채색 톤을 유지한다. */
+.user-view-connections {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.connection-group {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 16px;
+}
+
+.connection-group.tone-connected {
+  border-left-color: var(--green);
+}
+
+.connection-group.tone-gap {
+  border-left-color: var(--accent);
+}
+
+.connection-group.tone-potential {
+  border-left-color: var(--slate);
+  border-left-style: dashed;
+}
+
+.connection-group-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.connection-group.tone-connected .connection-group-title {
+  color: var(--green);
+}
+
+.connection-group.tone-gap .connection-group-title {
+  color: var(--accent-2);
+}
+
+.connection-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.connection-list li {
+  color: var(--text-muted);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
 /* 찾은 논문/산업 도입 근거 목록 — 추상적인 점수 대신 실제로 확인 가능한 출처를 보여준다 */
 .user-view-evidence {
   width: 100%;
@@ -458,18 +568,40 @@
   color: var(--text-muted);
 }
 
-.evidence-more-btn {
-  margin-top: 8px;
-  background: transparent;
-  border: none;
-  color: var(--accent-2);
-  font-weight: 600;
-  font-size: 12.5px;
-  padding: 4px 2px;
+/* 근거 목록 페이지네이션 — "나머지 N개 더 보기"로 한 번에 다 펼치는 대신 5개씩 넘겨봄 */
+.evidence-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 10px;
 }
 
-.evidence-more-btn:hover {
-  text-decoration: underline;
+.evidence-pager button {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 12.5px;
+  padding: 5px 14px;
+  border-radius: 999px;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.evidence-pager button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-2);
+}
+
+.evidence-pager button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.evidence-pager-status {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .evidence-list {
