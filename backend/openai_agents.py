@@ -20,6 +20,11 @@ class ScopeDecision(BaseModel):
     rationale: str
 
 
+class ScholarQueryResult(BaseModel):
+    query: str = Field(min_length=8)
+    rationale: str
+
+
 class VocabularyBridgeResult(BaseModel):
     terms: list[str] = Field(min_length=1, max_length=3)
     mapping_confidence: float = Field(ge=0, le=1)
@@ -59,6 +64,20 @@ class ResearchAgents:
             ),
             output_type=ScopeDecision,
         )
+        self.scholar_query_agent = Agent(
+            name="scholar_query_generator",
+            model=small_model,
+            instructions=(
+                "학술 검색용 쿼리 하나를 만든다. 입력 언어를 학술 표준 영어 용어로 바꾸고, "
+                "핵심 기술명뿐 아니라 모델 계열·배포 맥락·방법론을 함께 포함한다. "
+                "일반 단어 하나만 남는 쿼리를 만들지 않는다. 명확한 오탐 분야가 있을 때만 "
+                "HEVC, MIMO, ultrasound처럼 제외어를 추가한다. "
+                "예를 들어 '온디바이스 sLLM 양자화'는 'small language model/sLLM', "
+                "'on-device/edge/mobile', 'quantization'을 함께 검색해야 한다. "
+                "Liner Scholar Search에 그대로 전달할 수 있는 검색어를 반환한다."
+            ),
+            output_type=ScholarQueryResult,
+        )
         self.vocabulary_agent = Agent(
             name="vocabulary_bridge",
             model=small_model,
@@ -87,6 +106,22 @@ class ResearchAgents:
             topic,
             stage="scope_calibrator",
             purpose="scope decision",
+        )
+
+    async def scholar_query(self, topic: str, scope: ScopeDecision) -> ScholarQueryResult:
+        prompt = json.dumps(
+            {
+                "topic": topic,
+                "scope": scope.model_dump(),
+                "task": "Create one precise Scholar Search query with technical and deployment anchors.",
+            },
+            ensure_ascii=False,
+        )
+        return await self._run(
+            self.scholar_query_agent,
+            prompt,
+            stage="scholar_scout",
+            purpose="scholar query generation",
         )
 
     async def vocabulary_bridge(self, topic: str, scholar: dict[str, Any]) -> VocabularyBridgeResult:

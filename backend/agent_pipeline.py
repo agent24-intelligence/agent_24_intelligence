@@ -30,7 +30,22 @@ class ResearchPipeline:
         )
         scope = await self.agents.scope(topic)
         selected_topic = scope.selected_topics[0]
-        scholar_query = scholar_query or selected_topic
+        query_generation: dict[str, Any]
+        if scholar_query:
+            query_generation = {
+                "query": scholar_query,
+                "rationale": "디버깅용 scholar_query를 그대로 사용합니다.",
+            }
+        else:
+            emit_event(
+                "note",
+                {"text": "Scope 결과를 학술 표준 용어와 배포 맥락이 포함된 Scholar 쿼리로 정제합니다."},
+                stage="scholar_scout",
+                source="system",
+            )
+            generated_query = await self.agents.scholar_query(topic, scope)
+            scholar_query = generated_query.query
+            query_generation = generated_query.model_dump()
 
         emit_event(
             "note",
@@ -92,6 +107,7 @@ class ResearchPipeline:
                 "scholar": scholar_query,
                 "adoption": adoption_queries,
             },
+            "scholar_query_generation": query_generation,
             "vocabulary": vocabulary.model_dump(),
             "scholar": scholar,
             "adoption": adoption,
