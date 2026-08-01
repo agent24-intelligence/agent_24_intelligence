@@ -73,6 +73,7 @@ class ResearchPipeline:
             "connected_points": final_gap.get("connected_points", []),
             "gap_points": final_gap.get("gap_points", []),
             "potential_points": final_gap.get("potential_points", []),
+            "opportunity_suggestions": final_gap.get("opportunity_suggestions", []),
             "evidence": scholar.get("results", []) + _flatten_results(adoption),
             "counter_evidence": counter_evidence,
             "deep_research": deep_research,

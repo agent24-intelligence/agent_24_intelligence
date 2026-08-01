@@ -69,6 +69,10 @@ class GapCandidateResult(BaseModel):
     connected_points: list[str] = Field(default_factory=list, max_length=5)
     gap_points: list[str] = Field(default_factory=list, max_length=5)
     potential_points: list[str] = Field(default_factory=list, max_length=5)
+    # potential_points까지는 "이런 지점이 있다"는 관찰이라 사용자가 다음 행동으로 옮기기
+    # 어렵다는 피드백이 있었다. gap_points/potential_points를 근거로, 실제로 무엇을 만들면
+    # 갭을 메울 수 있는지 실행 가능한 제안까지 한 단계 더 만든다.
+    opportunity_suggestions: list[str] = Field(default_factory=list, max_length=3)
 
 
 class ResearchAgents:
@@ -184,7 +188,16 @@ class ResearchAgents:
                 "- potential_points: 지금은 직접적인 연결 근거가 없지만, 인접 사례나 산업 "
                 "동향으로 볼 때 향후 연결될 가능성이 있어 보이는 지점. 예: '산업 근거 Z가 "
                 "인접 기술을 도입하고 있어 이 기법도 확장 적용될 여지가 있음'.\n"
-                "확실한 근거가 없으면 억지로 채우지 말고 그 리스트를 비워둔다."
+                "확실한 근거가 없으면 억지로 채우지 말고 그 리스트를 비워둔다.\n"
+                "gap_points/potential_points를 근거로 opportunity_suggestions도 0~3개 만든다. "
+                "이건 '~할 여지가 있다' 같은 관찰이 아니라, 누가 무엇을 어떤 대상에게 어떻게 "
+                "제공하면 이 갭을 메울 수 있는지 구체적으로 실행 가능한 제안이어야 한다 — "
+                "제품/서비스 형태, 타겟 사용자, 어떤 학술 근거를 기반으로 하는지가 한 문장 안에 "
+                "드러나야 한다. 나쁜 예(관찰에 그침): '확장 적용될 여지가 있음'. 좋은 예(제안): "
+                "'학술 논문의 최신 임베딩 기반 표절 탐지 기법을 아직 상용화하지 않은 소규모 "
+                "학술지 대상 검증 서비스로 제공하면 이 갭을 메울 수 있음.' gap_label이 no_gap이거나 "
+                "gap_points가 비어 있어 메울 갭 자체가 없으면 opportunity_suggestions도 빈 "
+                "배열로 둔다 — 없는 기회를 억지로 만들어내지 않는다."
             ),
             output_type=GapCandidateResult,
         )
