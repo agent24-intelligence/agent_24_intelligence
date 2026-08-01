@@ -184,7 +184,7 @@ export default function UserView() {
           Gap Radar
         </span>
         <h1>Research-to-Reality Radar</h1>
-        <p>기술 하나를 입력하면, 학계 연구와 산업 적용 사이의 격차를 분석합니다.</p>
+        <p>연구 분야/기술 하나를 입력하면, 학계 연구와 산업 적용 사이의 격차를 분석합니다.</p>
       </div>
 
       <form className="user-view-form" onSubmit={runAnalyze}>
@@ -260,9 +260,24 @@ export default function UserView() {
                 srcDoc={artifact.html}
                 sandbox="allow-scripts allow-same-origin"
                 onLoad={(e) => {
-                  const doc = e.currentTarget.contentDocument
-                  if (doc?.documentElement) {
-                    e.currentTarget.style.height = `${doc.documentElement.scrollHeight}px`
+                  const iframe = e.currentTarget
+                  const doc = iframe.contentDocument
+                  if (!doc?.documentElement) return
+
+                  const resize = () => {
+                    iframe.style.height = `${doc.documentElement.scrollHeight}px`
+                  }
+                  resize()
+
+                  // 차트 라이브러리가 로드 직후 비동기로 그려지는 경우 scrollHeight가
+                  // 처음엔 작게 잡혀서 한 번으로는 부족하다. 계속 감시해서 늘어나면 다시 맞춘다.
+                  if ('ResizeObserver' in window) {
+                    const ro = new ResizeObserver(resize)
+                    ro.observe(doc.documentElement)
+                  } else {
+                    setTimeout(resize, 200)
+                    setTimeout(resize, 600)
+                    setTimeout(resize, 1200)
                   }
                 }}
               />
