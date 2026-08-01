@@ -1091,7 +1091,7 @@ main {
 }
 
 .gap-map-frame {
-  flex: 1;
+  flex: 0 0 auto;
   min-height: 400px;
   width: 100%;
   border: 1px solid var(--border);

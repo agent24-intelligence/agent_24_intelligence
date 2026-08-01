@@ -7,6 +7,66 @@ import { connectStream } from '../lib/sse'
 // 참고: Liner 문서 기준 이벤트 순서 = start → start-step → (data-search-references) →
 // data-atlas → finish-step → finish. 평균 지연 20~30초.
 
+function fitIframeToContent(iframe) {
+  const doc = iframe.contentDocument
+  if (!doc?.documentElement) return
+
+  const setUnclamped = (el) => {
+    el.style.setProperty('height', 'auto', 'important')
+    el.style.setProperty('min-height', '0', 'important')
+    el.style.setProperty('max-height', 'none', 'important')
+    el.style.setProperty('overflow', 'visible', 'important')
+    el.style.setProperty('overflow-x', 'visible', 'important')
+    el.style.setProperty('overflow-y', 'visible', 'important')
+  }
+
+  const unclamp = () => {
+    setUnclamped(doc.documentElement)
+    if (doc.body) setUnclamped(doc.body)
+
+    doc.querySelectorAll('*').forEach((el) => {
+      const cs = doc.defaultView?.getComputedStyle(el)
+      if (!cs) return
+      const hasScroll = [cs.overflow, cs.overflowX, cs.overflowY].some((v) => ['auto', 'scroll'].includes(v))
+      if (hasScroll || el.id === 'vis-container') setUnclamped(el)
+    })
+  }
+
+  const measureHeight = () => {
+    const rootTop = doc.documentElement.getBoundingClientRect().top
+    let visualBottom = 0
+    doc.querySelectorAll('body *').forEach((el) => {
+      const rect = el.getBoundingClientRect()
+      if (rect.width > 0 || rect.height > 0) {
+        visualBottom = Math.max(visualBottom, rect.bottom - rootTop)
+      }
+    })
+
+    return Math.ceil(Math.max(
+      doc.documentElement.scrollHeight,
+      doc.body?.scrollHeight || 0,
+      visualBottom,
+      400,
+    ))
+  }
+
+  const resize = () => {
+    unclamp()
+    iframe.style.height = `${measureHeight()}px`
+  }
+
+  resize()
+
+  if ('ResizeObserver' in window && doc.body) {
+    const ro = new ResizeObserver(resize)
+    ro.observe(doc.body)
+    const visContainer = doc.getElementById('vis-container')
+    if (visContainer) ro.observe(visContainer)
+  }
+
+  ;[200, 600, 1200, 2200].forEach((delay) => setTimeout(resize, delay))
+}
+
 export default function GapMap() {
   const [artifact, setArtifact] = useState(null) // { html, theme, description }
   const [references, setReferences] = useState([])
@@ -62,7 +122,13 @@ export default function GapMap() {
             {artifact.theme && <span className="event-stage">{artifact.theme}</span>}
             {artifact.description && <span className="gap-map-desc">{artifact.description}</span>}
           </div>
-          <iframe title="gap-map" className="gap-map-frame" srcDoc={artifact.html} sandbox="allow-scripts" />
+          <iframe
+            title="gap-map"
+            className="gap-map-frame"
+            srcDoc={artifact.html}
+            sandbox="allow-scripts allow-same-origin"
+            onLoad={(e) => fitIframeToContent(e.currentTarget)}
+          />
           {references.length > 0 && (
             <div className="gap-map-refs">
               <h4>참고 자료 ({references.length})</h4>
