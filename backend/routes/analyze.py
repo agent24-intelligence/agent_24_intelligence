@@ -216,19 +216,18 @@ async def analyze(request: AnalyzeRequest):
 
         if preflight.status == "rejected":
             return _preflight_response(preflight)
-        if preflight.status == "needs_calibration" and _looks_too_broad_for_demo(preflight.resolved_topic or request.topic):
-            return _preflight_response(preflight)
         if preflight.status == "needs_calibration":
             emit_event(
                 "note",
                 {
-                    "text": "입력 주제가 분석 가능해 추천만 참고하고 원문 주제로 파이프라인을 계속 진행합니다.",
+                    "text": "주제 구체화가 필요해 추천 검색어만 반환하고 분석을 중단합니다.",
                     "status": preflight.status,
                     "reason_code": preflight.reason_code,
                 },
                 stage="input_preflight",
                 source="system",
             )
+            return _preflight_response(preflight)
 
         resolved_topic = preflight.resolved_topic
         pipeline_run = pipeline.run(
