@@ -1,5 +1,7 @@
-"""Liner Search API client used by the research pipeline."""
+"""Liner API client for search, agent, research, and visualization endpoints."""
 
+import asyncio
+import json
 import os
 from typing import Any
 
@@ -9,7 +11,7 @@ from events import emit_event
 
 
 class LinerClient:
-    """Small async client for Liner's Web and Scholar Search endpoints."""
+    """Async client that exposes Liner JSON and SSE APIs to the pipeline."""
 
     def __init__(self, base_url: str | None = None, api_key: str | None = None, timeout: float = 90.0):
         self.base_url = (base_url or os.environ.get("LINER_API_BASE_URL", "https://platform.liner.com")).rstrip("/")
@@ -50,6 +52,85 @@ class LinerClient:
             lang=lang,
             max_results=max_results,
             stage=stage,
+        )
+
+    async def search_agent(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        mode: str = "general",
+        lang: str = "ko",
+        request_id: str | None = None,
+        stage: str = "adversarial_verifier",
+    ) -> dict[str, Any]:
+        body = {
+            "messages": messages,
+            "lang": lang,
+            "mode": mode,
+            "request_id": request_id,
+        }
+        body = {key: value for key, value in body.items() if value is not None}
+        return await self._stream_request(
+            path="/api/v1/agents/search",
+            body=body,
+            stage=stage,
+            name="search_agent",
+            timeout_s=self.timeout,
+        )
+
+    async def deep_research(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        lang: str = "ko",
+        timeout_s: float = 25,
+        request_id: str | None = None,
+        stage: str = "conditional_deep_research",
+    ) -> dict[str, Any]:
+        body = {
+            "messages": messages,
+            "lang": lang,
+            "request_id": request_id,
+        }
+        body = {key: value for key, value in body.items() if value is not None}
+        return await self._stream_request(
+            path="/api/v1/agents/deep-research",
+            body=body,
+            stage=stage,
+            name="deep_research",
+            timeout_s=timeout_s,
+            accept_sse=True,
+        )
+
+    async def visualize(
+        self,
+        query: str,
+        *,
+        is_search_context: bool = True,
+        max_results: int = 10,
+        appearance: str = "light",
+        date_range: str | None = None,
+        stage: str = "gap_map",
+    ) -> dict[str, Any]:
+        body = {
+            "query": query,
+            "appearance": appearance,
+        }
+        if is_search_context:
+            body.update(
+                {
+                    "is_search_context": True,
+                    "max_results": max_results,
+                    "date_range": date_range,
+                }
+            )
+        body = {key: value for key, value in body.items() if value is not None}
+        return await self._stream_request(
+            path="/api/v1/tools/visualization",
+            body=body,
+            stage=stage,
+            name="visualization",
+            timeout_s=self.timeout,
         )
 
     async def _search(
@@ -105,3 +186,93 @@ class LinerClient:
             source="liner",
         )
         return response_body
+
+    async def _stream_request(
+        self,
+        *,
+        path: str,
+        body: dict[str, Any],
+        stage: str,
+        name: str,
+        timeout_s: float,
+        accept_sse: bool = False,
+    ) -> dict[str, Any]:
+        url = f"{self.base_url}{path}"
+        call_event = emit_event(
+            "tool_call",
+            {"name": name, "method": "POST", "url": url, "body": body, "timeout_s": timeout_s},
+            stage=stage,
+            source="liner",
+        )
+        headers = {"x-api-key": self.api_key, "Content-Type": "application/json"}
+        if accept_sse or name in {"search_agent", "visualization"}:
+            headers["Accept"] = "text/event-stream"
+
+        events: list[dict[str, Any]] = []
+        try:
+            async with httpx.AsyncClient(timeout=None) as client:
+                async with client.stream("POST", url, headers=headers, json=body) as response:
+                    response.raise_for_status()
+                    async with asyncio.timeout(timeout_s):
+                        async for line in response.aiter_lines():
+                            event = _parse_sse_line(line)
+                            if event is None:
+                                continue
+                            events.append(event)
+                            event_type = event.get("type")
+                            if event_type:
+                                emit_event(event_type, event, stage=stage, source="liner")
+                            else:
+                                emit_event("sse_line", event, stage=stage, source="liner")
+        except TimeoutError:
+            emit_event(
+                "error",
+                {
+                    "name": name,
+                    "call_id": call_event["id"],
+                    "reason": "timeout",
+                    "timeout_s": timeout_s,
+                    "events_received": len(events),
+                },
+                stage=stage,
+                source="liner",
+            )
+            return {"events": events, "timed_out": True}
+        except Exception as exc:
+            emit_event(
+                "error",
+                {"name": name, "call_id": call_event["id"], "message": str(exc)},
+                stage=stage,
+                source="liner",
+            )
+            raise
+
+        result = {"events": events, "timed_out": False}
+        emit_event(
+            "tool_result",
+            {
+                "name": name,
+                "call_id": call_event["id"],
+                "events_received": len(events),
+                "event_types": [event.get("type") for event in events if event.get("type")],
+            },
+            stage=stage,
+            source="liner",
+        )
+        return result
+
+
+def _parse_sse_line(line: str) -> dict[str, Any] | None:
+    """Parse one Liner SSE data line and stop at the documented stream sentinel."""
+    if not line.startswith("data:"):
+        return None
+    data = line.split(":", 1)[1].strip()
+    if not data or data == "[DONE]":
+        return None
+    try:
+        payload = json.loads(data)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid Liner SSE data: {data}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"unexpected Liner SSE payload: {payload!r}")
+    return payload
