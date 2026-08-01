@@ -141,6 +141,10 @@ class GapNarrativeResult(BaseModel):
     connected_points: list[str] = Field(default_factory=list, max_length=5)
     gap_points: list[str] = Field(default_factory=list, max_length=5)
     potential_points: list[str] = Field(default_factory=list, max_length=5)
+    # potential_points까지는 "이런 지점이 있다"는 관찰이라 사용자가 다음 행동으로 옮기기
+    # 어렵다는 피드백이 있었다. gap_points/potential_points를 근거로, 실제로 무엇을 만들면
+    # 갭을 메울 수 있는지 실행 가능한 제안까지 한 단계 더 만든다.
+    opportunity_suggestions: list[str] = Field(default_factory=list, max_length=3)
 
 
 class DeepResearchReviewResult(BaseModel):
@@ -271,7 +275,39 @@ class ResearchAgents:
                 "연구 클러스터와 산업 클러스터를 technology, use_case, context, expected_value 네 "
                 "차원으로 비교한다. 각 값은 반드시 1.0(동일), 0.5(관련되나 조건이 다름), 0.0(다르거나 "
                 "판단 불가) 중 하나다. 최종 link_type, similarity, 점수, label은 반환하지 않는다. "
-                "근거가 충분하지 않으면 0.0과 낮은 confidence를 반환한다."
+                "근거가 충분하지 않으면 0.0과 낮은 confidence를 반환한다. "
+                "학술 검색 결과와 산업 검색 결과를 대조해 적용 갭 후보를 판정한다. "
+                "연구 성숙도, 산업 도입 증거, 검색 커버리지를 분리해서 평가하고, "
+                "근거가 부족하면 억지로 gap_candidate를 만들지 않는다. "
+                "should_deep_research는 근거 부족, 모순, 고임팩트 저확신일 때만 true로 한다.\n"
+                "evidence_maturity, adoption_evidence, coverage_confidence는 반드시 "
+                "0~100 사이의 정수다 (10점 만점이 아니다). 대략 0~20은 근거가 거의 없음, "
+                "40~60은 어느 정도 있지만 제한적, 70~90은 풍부하고 명확한 근거, 90 이상은 "
+                "매우 강력하고 광범위한 근거를 뜻한다. 예를 들어 관련 논문이 10개 이상 "
+                "나오고 다수의 실제 서비스(예: 유명 상용 제품)가 검색되면 evidence_maturity와 "
+                "adoption_evidence는 70 이상이어야 한다 — 이런 상황에서 3, 4처럼 낮은 점수를 "
+                "주면 명백히 틀린 판정이다. 점수는 실제로 검색된 근거의 양·질과 반드시 "
+                "비례해야 하며, rationale의 서술 내용과 모순되지 않아야 한다.\n"
+                "rationale과 별개로, 판정 근거를 세 리스트로도 나눠서 준다 (각 항목은 어떤 "
+                "논문/산업 자료를 근거로 했는지 구체적으로 알 수 있게 한두 문장으로, 최대 5개씩):\n"
+                "- connected_points: 학술 근거와 산업 근거가 실제로 서로 맞아떨어지는 지점. "
+                "예: '논문 X의 양자화 기법이 산업 사례 Y에서 그대로 채택됨'.\n"
+                "- gap_points: 학술 쪽엔 있지만 산업 검색 결과에서 대응하는 사례를 못 찾은 "
+                "지점 — 이게 진짜 '갭'이다. 예: '논문 X가 제안한 방법은 학술적으로는 성숙하지만 "
+                "산업 검색 결과 중 이를 프로덕션에 적용했다는 사례가 없음'.\n"
+                "- potential_points: 지금은 직접적인 연결 근거가 없지만, 인접 사례나 산업 "
+                "동향으로 볼 때 향후 연결될 가능성이 있어 보이는 지점. 예: '산업 근거 Z가 "
+                "인접 기술을 도입하고 있어 이 기법도 확장 적용될 여지가 있음'.\n"
+                "확실한 근거가 없으면 억지로 채우지 말고 그 리스트를 비워둔다.\n"
+                "gap_points/potential_points를 근거로 opportunity_suggestions도 0~3개 만든다. "
+                "이건 '~할 여지가 있다' 같은 관찰이 아니라, 누가 무엇을 어떤 대상에게 어떻게 "
+                "제공하면 이 갭을 메울 수 있는지 구체적으로 실행 가능한 제안이어야 한다 — "
+                "제품/서비스 형태, 타겟 사용자, 어떤 학술 근거를 기반으로 하는지가 한 문장 안에 "
+                "드러나야 한다. 나쁜 예(관찰에 그침): '확장 적용될 여지가 있음'. 좋은 예(제안): "
+                "'학술 논문의 최신 임베딩 기반 표절 탐지 기법을 아직 상용화하지 않은 소규모 "
+                "학술지 대상 검증 서비스로 제공하면 이 갭을 메울 수 있음.' gap_label이 no_gap이거나 "
+                "gap_points가 비어 있어 메울 갭 자체가 없으면 opportunity_suggestions도 빈 "
+                "배열로 둔다 — 없는 기회를 억지로 만들어내지 않는다."
             ),
             output_type=LinkDimensionBatch,
         )
