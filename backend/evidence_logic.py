@@ -211,7 +211,14 @@ def classify_link(
 ) -> str:
     if latest_relation == "does_not_use" and similarity >= LINK_THRESHOLDS["partial"]:
         return "blocked"
-    if latest_relation == "uses" and technology_match >= 0.5 and similarity >= LINK_THRESHOLDS["direct"]:
+    # A direct adoption claim must match the actual technology and use case.
+    # Neighboring use cases remain useful as leads, but are not direct adoption.
+    if (
+        latest_relation == "uses"
+        and technology_match >= 1.0
+        and use_case_match >= 1.0
+        and similarity >= LINK_THRESHOLDS["direct"]
+    ):
         return "direct"
     if latest_relation == "uses" and similarity >= LINK_THRESHOLDS["partial"]:
         return "partial"
@@ -270,11 +277,20 @@ def calculate_adoption_evidence(
     direct_production_orgs: set[str] = set()
     partial_production_orgs: set[str] = set()
     connected_orgs: set[str] = set()
+    adjacent_orgs: set[str] = set()
+    adjacent_cluster_ids: set[str] = set()
     for link in links:
         if link.adoption_cluster_id is None or link.link_type not in {"direct", "partial"}:
             continue
         cluster = adoption_clusters.get(link.adoption_cluster_id)
         if not cluster or not cluster.subject:
+            continue
+        # Partial links are adjacent evidence only. Counting them as adoption
+        # points makes recommendation/curation cases inflate exact classifier
+        # adoption scores.
+        if link.link_type == "partial":
+            adjacent_orgs.add(cluster.subject)
+            adjacent_cluster_ids.add(cluster.cluster_id)
             continue
         if cluster.usage_context == "vendor_product_integration":
             points = VENDOR_PRODUCT_INTEGRATION_POINTS
@@ -313,6 +329,8 @@ def calculate_adoption_evidence(
             "direct_production_orgs": len(direct_production_orgs),
             "partial_production_orgs": len(partial_production_orgs),
             "connected_orgs": len(connected_orgs),
+            "adjacent_orgs": len(adjacent_orgs),
+            "adjacent_clusters": len(adjacent_cluster_ids),
         },
         "details": {
             "cluster_scores": cluster_scores,
@@ -320,6 +338,8 @@ def calculate_adoption_evidence(
             "direct_production_orgs": sorted(direct_production_orgs),
             "partial_production_orgs": sorted(partial_production_orgs),
             "connected_orgs": sorted(connected_orgs),
+            "adjacent_orgs": sorted(adjacent_orgs),
+            "adjacent_cluster_ids": sorted(adjacent_cluster_ids),
         },
     }
 
@@ -390,7 +410,7 @@ def classify_gap_types(
     partial = [link for link in links if link.link_type == "partial"]
     blocked = [link for link in links if link.link_type == "blocked"]
     gap_types: list[GapType] = []
-    if not direct and not partial:
+    if not direct:
         gap_types.append("no_adoption_link" if coverage_confidence >= LABEL_THRESHOLDS["gap_coverage"] else "possible_no_adoption_link")
     for link in direct + partial:
         adoption = adoption_clusters.get(link.adoption_cluster_id or "")

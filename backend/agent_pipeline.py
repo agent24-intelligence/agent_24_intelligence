@@ -1259,7 +1259,7 @@ def _deterministic_narrative(analysis: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "rationale": (
-            f"연구 근거 성숙도 {scores.get('evidence_maturity', 0)}/100, "
+            f"검색된 연구 근거 성숙도 {scores.get('evidence_maturity', 0)}/100, "
             f"산업 도입 증거 {scores.get('adoption_evidence', 0)}/100, "
             f"검색 커버리지 {scores.get('coverage_confidence', 0)}/100를 기준으로 "
             f"{label}을 판정했습니다. 직접 연결 {direct_count}건, 부분 연결 {partial_count}건, "
