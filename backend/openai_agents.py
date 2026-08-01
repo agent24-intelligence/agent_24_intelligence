@@ -364,6 +364,19 @@ class ResearchAgents:
             ),
             output_type=DeepResearchReviewResult,
         )
+        self.final_synthesis_writer = Agent(
+            name="final_synthesis_writer",
+            model=large_model,
+            instructions=(
+                "너는 학계-산업 적용 갭 분석 결과를 최종 리포트로 정리하는 writer다. "
+                "입력 JSON에 있는 점수, label, gap_types, evidence, barriers, suggestions만 사용한다. "
+                "점수·라벨·갭 유형을 바꾸거나 새 근거를 지어내지 않는다. 확인되지 않은 원인은 "
+                "'추정' 또는 '확인되지 않음'으로 분리한다. 한국어로 작성한다.\n"
+                "형식: 짧은 결론 1문단, '근거 대조', '간극 원인', '적용 기회', '신뢰도' 순서. "
+                "적용 기회는 누가, 무엇을, 어떤 사용자에게, 어떤 검증 지표로 시작할지 구체적으로 쓴다. "
+                "전체는 700~1000자 안팎으로, 과장 수식어와 느낌표 없이 숫자·근거 중심으로 작성한다."
+            ),
+        )
 
     async def scope(self, topic: str, *, timeout_s: float | None = None) -> ScopeDecision:
         return await self._run(
@@ -482,6 +495,158 @@ class ResearchAgents:
             timeout_s=timeout_s,
         )
 
+    async def stream_final_synthesis(
+        self,
+        analysis: dict[str, Any],
+        *,
+        run_id: str,
+        timeout_s: float | None = None,
+    ) -> str:
+        prompt = json.dumps(analysis, ensure_ascii=False)
+        stage = "final_synthesis"
+        call_event = emit_event(
+            "tool_call",
+            {
+                "name": self.final_synthesis_writer.name,
+                "purpose": "streamed final analysis report",
+                "model": self.final_synthesis_writer.model,
+                "run_id": run_id,
+                "input": prompt,
+            },
+            stage=stage,
+            source="openai",
+        )
+        chunks: list[str] = []
+        emit_event(
+            "text-start",
+            {"name": self.final_synthesis_writer.name, "call_id": call_event["id"], "run_id": run_id},
+            stage=stage,
+            source="openai",
+        )
+
+        try:
+            streamed = Runner.run_streamed(self.final_synthesis_writer, prompt)
+
+            async def consume() -> None:
+                async for event in streamed.stream_events():
+                    delta = _stream_text_delta(event)
+                    if not delta:
+                        continue
+                    chunks.append(delta)
+                    emit_event(
+                        "text-delta",
+                        {
+                            "name": self.final_synthesis_writer.name,
+                            "call_id": call_event["id"],
+                            "run_id": run_id,
+                            "delta": delta,
+                        },
+                        stage=stage,
+                        source="openai",
+                    )
+
+            await asyncio.wait_for(consume(), timeout=timeout_s) if timeout_s is not None else await consume()
+            text = "".join(chunks)
+            if not text and isinstance(streamed.final_output, str):
+                text = streamed.final_output
+                emit_event(
+                    "text-delta",
+                    {
+                        "name": self.final_synthesis_writer.name,
+                        "call_id": call_event["id"],
+                        "run_id": run_id,
+                        "delta": text,
+                    },
+                    stage=stage,
+                    source="openai",
+                )
+            emit_event(
+                "text-end",
+                {
+                    "name": self.final_synthesis_writer.name,
+                    "call_id": call_event["id"],
+                    "run_id": run_id,
+                    "text": text,
+                },
+                stage=stage,
+                source="openai",
+            )
+            emit_event(
+                "tool_result",
+                {"name": self.final_synthesis_writer.name, "call_id": call_event["id"], "run_id": run_id, "chars": len(text)},
+                stage=stage,
+                source="openai",
+            )
+            return text
+        except (asyncio.TimeoutError, TimeoutError) as exc:
+            text = "".join(chunks)
+            emit_event(
+                "note",
+                {
+                    "name": self.final_synthesis_writer.name,
+                    "call_id": call_event["id"],
+                    "run_id": run_id,
+                    "reason": "budget_timeout",
+                    "timeout_kind": "budget",
+                    "timeout_s": timeout_s,
+                },
+                stage=stage,
+                source="openai",
+            )
+            emit_event(
+                "text-end",
+                {
+                    "name": self.final_synthesis_writer.name,
+                    "call_id": call_event["id"],
+                    "run_id": run_id,
+                    "text": text,
+                    "timed_out": True,
+                },
+                stage=stage,
+                source="openai",
+            )
+            emit_event(
+                "tool_result",
+                {
+                    "name": self.final_synthesis_writer.name,
+                    "call_id": call_event["id"],
+                    "run_id": run_id,
+                    "timed_out": True,
+                    "timeout_kind": "budget",
+                    "chars": len(text),
+                },
+                stage=stage,
+                source="openai",
+            )
+            raise AgentBudgetTimeout(f"{self.final_synthesis_writer.name} exceeded its {timeout_s}s budget") from exc
+        except Exception as exc:
+            text = "".join(chunks)
+            emit_event(
+                "error",
+                {
+                    "name": self.final_synthesis_writer.name,
+                    "call_id": call_event["id"],
+                    "run_id": run_id,
+                    "message": str(exc),
+                    "partial_chars": len(text),
+                },
+                stage=stage,
+                source="openai",
+            )
+            emit_event(
+                "text-end",
+                {
+                    "name": self.final_synthesis_writer.name,
+                    "call_id": call_event["id"],
+                    "run_id": run_id,
+                    "text": text,
+                    "error": str(exc),
+                },
+                stage=stage,
+                source="openai",
+            )
+            raise
+
     async def _run(
         self,
         agent: Agent,
@@ -576,6 +741,19 @@ def _compact_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         )
     return compact
+
+
+def _stream_text_delta(event: Any) -> str:
+    data = getattr(event, "data", None)
+    event_type = getattr(data, "type", None) or getattr(event, "type", None)
+    if isinstance(data, dict):
+        event_type = data.get("type") or event_type
+        delta = data.get("delta")
+    else:
+        delta = getattr(data, "delta", None)
+    if event_type == "response.output_text.delta" and isinstance(delta, str):
+        return delta
+    return ""
 
 
 def _clip_text(value: Any, limit: int) -> str:

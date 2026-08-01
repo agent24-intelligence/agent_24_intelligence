@@ -1019,6 +1019,49 @@
   background: var(--accent);
 }
 
+.final-synthesis {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin-bottom: 24px;
+}
+
+.final-synthesis-title {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.final-synthesis-body {
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.final-synthesis-streaming {
+  border-color: var(--accent);
+}
+
+.final-synthesis-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 1em;
+  margin-left: 3px;
+  background: var(--accent);
+  vertical-align: -0.15em;
+  animation: synthesis-cursor 0.9s steps(2, start) infinite;
+}
+
+@keyframes synthesis-cursor {
+  50% {
+    opacity: 0;
+  }
+}
+
 /* 찾은 논문/산업 도입 근거 목록 — 추상적인 점수 대신 실제로 확인 가능한 출처를 보여준다 */
 .user-view-evidence {
   width: 100%;

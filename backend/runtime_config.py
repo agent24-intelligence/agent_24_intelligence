@@ -43,6 +43,7 @@ class RuntimeConfig:
     counter_relink_timeout_s: float = field(default_factory=lambda: _env_float("COUNTER_RELINK_TIMEOUT_S", 4))
     deep_research_timeout_s: float = field(default_factory=lambda: _env_float("DEEP_RESEARCH_TIMEOUT_S", 5))
     finalization_timeout_s: float = field(default_factory=lambda: _env_float("FINALIZATION_TIMEOUT_S", 4))
+    final_synthesis_timeout_s: float = field(default_factory=lambda: _env_float("FINAL_SYNTHESIS_TIMEOUT_S", 30))
     visualization_timeout_s: float = field(default_factory=lambda: _env_float("VISUALIZATION_TIMEOUT_S", 4))
     final_reserve_s: float = field(default_factory=lambda: _env_float("FINAL_RESERVE_S", 7))
     max_search_results: int = field(default_factory=lambda: max(1, int(os.environ.get("MAX_SEARCH_RESULTS", "5"))))

@@ -19,6 +19,7 @@ const STAGE_LABEL = {
   adversarial_verifier: '반증 검토하는 중',
   conditional_deep_research: '심층 조사하는 중',
   finalization: '최종 판정을 정리하는 중',
+  final_synthesis: '최종 분석 작성하는 중',
   gap_map: '결과 정리하는 중',
 }
 
@@ -393,6 +394,7 @@ export default function UserView() {
   const [status, setStatus] = useState('idle') // idle | running | done | error
   const [stage, setStage] = useState(null)
   const [result, setResult] = useState(null)
+  const [finalSynthesis, setFinalSynthesis] = useState(null)
   const [errorMsg, setErrorMsg] = useState(null)
   const [liveSuggestions, setLiveSuggestions] = useState([])
   const [liveGuidance, setLiveGuidance] = useState(null) // 추천이 하나도 없을 때(rejected) 보여줄 안내 문구
@@ -403,12 +405,47 @@ export default function UserView() {
   const abortRef = useRef(null)
   const suggestAbortRef = useRef(null)
   const selectedSuggestionRef = useRef(null)
+  const resultRunIdRef = useRef(null)
+  const synthesisBuffersRef = useRef({})
   const confirmedBarriers = resultList(result, 'confirmed_barriers')
   const inferredBarriers = resultList(result, 'inferred_barriers')
+
+  function applyFinalSynthesisEvent(event) {
+    if (event.stage !== 'final_synthesis') return
+    const runId = event.payload?.run_id
+    if (!runId) return
+    const current = synthesisBuffersRef.current[runId] || { runId, status: 'streaming', text: '' }
+    let next = current
+
+    if (event.type === 'text-start') {
+      next = { runId, status: 'streaming', text: '' }
+    } else if (event.type === 'text-delta') {
+      next = { ...current, status: 'streaming', text: `${current.text || ''}${event.payload?.delta || ''}` }
+    } else if (event.type === 'text-end') {
+      const text = event.payload?.text && event.payload.text.length >= (current.text || '').length
+        ? event.payload.text
+        : current.text || ''
+      next = {
+        ...current,
+        status: event.payload?.error ? 'error' : event.payload?.timed_out ? 'timeout' : 'complete',
+        text,
+      }
+    } else if (event.type === 'error') {
+      next = { ...current, status: 'error', error: event.payload?.message || '최종 분석 생성 실패' }
+    } else {
+      return
+    }
+
+    synthesisBuffersRef.current = { ...synthesisBuffersRef.current, [runId]: next }
+    if (resultRunIdRef.current === runId) {
+      setFinalSynthesis(next)
+    }
+  }
 
   useEffect(() => {
     disconnectRef.current = connectStream((event) => {
       if (event.stage) setStage(event.stage)
+      applyFinalSynthesisEvent(event)
       // 검색어 문구는 단계가 바뀌어도 지우지 않고 마지막 값을 그대로 둔다 — "결과 정리하는
       // 중" 같은 뒷 단계에서도 방금 어떤 검색어로 찾았는지 맥락이 이어져 보이게.
       // (event.payload.body.query가 빈 문자열이면 이 조건 자체가 false라 절대 '' 그대로
@@ -481,12 +518,15 @@ export default function UserView() {
     if (topicOverride) setTopic(topicOverride)
     setStatus('running')
     setResult(null)
+    setFinalSynthesis(null)
     setErrorMsg(null)
     setStage(null)
     setSearchNote(null)
     setLiveSuggestions([])
     setLiveGuidance(null)
     setEvidencePage({ scholar: 0, adoption: 0 })
+    resultRunIdRef.current = null
+    synthesisBuffersRef.current = {}
 
     const controller = new AbortController()
     abortRef.current = controller
@@ -526,7 +566,9 @@ export default function UserView() {
         throw new Error(detail || `요청이 실패했습니다 (${res.status}). 잠시 후 다시 시도해주세요.`)
       }
 
+      resultRunIdRef.current = data.run_id || null
       setResult(data)
+      setFinalSynthesis(data.run_id ? synthesisBuffersRef.current[data.run_id] || data.final_synthesis || null : null)
       setStatus('done')
       setLastAnalyzedTopic(topicToRun.trim())
     } catch (err) {
@@ -570,6 +612,9 @@ export default function UserView() {
       : result?.recommendations?.length > 0 && result?.message?.includes('검색어를 다시 확인해')
         ? '입력하신 주제로 아래 추천 검색어를 만들었어요. 하나를 선택해 보세요.'
         : result?.message
+  const finalSynthesisStatus = finalSynthesis?.status || result?.final_synthesis?.status
+  const finalSynthesisText = finalSynthesis?.text || result?.final_synthesis?.text || ''
+  const showFinalSynthesis = Boolean(result?.final_synthesis || finalSynthesis)
 
   return (
     <div className={`user-view${status === 'idle' ? ' is-centered' : ''}`}>
@@ -860,6 +905,16 @@ export default function UserView() {
                   <li key={i}>{text}</li>
                 ))}
               </ul>
+            </div>
+          )}
+
+          {showFinalSynthesis && (
+            <div className={`final-synthesis final-synthesis-${finalSynthesisStatus || 'streaming'}`}>
+              <h3 className="final-synthesis-title">최종 분석</h3>
+              <div className="final-synthesis-body">
+                {finalSynthesisText || '분석 글 작성 중'}
+                {finalSynthesisStatus === 'streaming' && <span className="final-synthesis-cursor" />}
+              </div>
             </div>
           )}
 

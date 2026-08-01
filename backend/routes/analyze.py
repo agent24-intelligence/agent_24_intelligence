@@ -1,6 +1,8 @@
 """Research pipeline API route."""
 
 import asyncio
+from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field, field_validator
@@ -254,6 +256,7 @@ async def analyze(request: AnalyzeRequest):
                 "timing": timing,
             }
         )
+        _start_final_synthesis(pipeline, result, request_runtime)
         return result
 
     except (asyncio.TimeoutError, TimeoutError):
@@ -281,6 +284,7 @@ async def analyze(request: AnalyzeRequest):
                 },
             }
         )
+        _start_final_synthesis(pipeline, result, request_runtime)
         return result
     except PreflightFailure as exc:
         return JSONResponse(
@@ -301,3 +305,97 @@ async def analyze(request: AnalyzeRequest):
             status_code=500,
             content={"error": "analyze_failed", "message": str(exc)},
         )
+
+
+def _start_final_synthesis(pipeline: ResearchPipeline, result: dict[str, Any], runtime: RuntimeConfig) -> None:
+    if result.get("status") != "completed" or result.get("label") in {"unconfirmed_field"}:
+        return
+    run_id = f"analysis_{uuid4().hex[:12]}"
+    result["run_id"] = run_id
+    result["final_synthesis"] = {"status": "streaming", "text": ""}
+    payload = _final_synthesis_payload(result)
+    timeout_s = None if runtime.disable_timeouts else runtime.final_synthesis_timeout_s
+    asyncio.create_task(_run_final_synthesis_stream(pipeline, payload, run_id, timeout_s))
+
+
+async def _run_final_synthesis_stream(
+    pipeline: ResearchPipeline,
+    payload: dict[str, Any],
+    run_id: str,
+    timeout_s: float | None,
+) -> None:
+    try:
+        await pipeline.agents.stream_final_synthesis(payload, run_id=run_id, timeout_s=timeout_s)
+    except AgentBudgetTimeout:
+        return
+    except Exception as exc:
+        emit_event(
+            "error",
+            {"name": "final_synthesis_writer", "run_id": run_id, "message": str(exc)},
+            stage="final_synthesis",
+            source="system",
+        )
+
+
+def _final_synthesis_payload(result: dict[str, Any]) -> dict[str, Any]:
+    candidate = result.get("gap_candidate") or {}
+    return {
+        "topic": result.get("topic"),
+        "label": result.get("label"),
+        "analysis_status": result.get("analysis_status"),
+        "scores": result.get("scores", {}),
+        "gap_types": result.get("gap_types", []),
+        "rationale": result.get("rationale", ""),
+        "connected_points": result.get("connected_points", []),
+        "gap_points": result.get("gap_points", []),
+        "potential_points": result.get("potential_points", []),
+        "confirmed_barriers": result.get("confirmed_barriers", []),
+        "inferred_barriers": result.get("inferred_barriers", []),
+        "opportunity_suggestions": result.get("opportunity_suggestions", []),
+        "research_cluster": candidate.get("research_cluster", {}),
+        "candidate_connections": candidate.get("candidate_connections", [])[:5],
+        "links": candidate.get("links", [])[:5],
+        "score_breakdown": candidate.get("score_breakdown", {}),
+        "vocabulary": result.get("vocabulary", {}),
+        "queries": result.get("queries", {}),
+        "deep_research": _compact_deep_research(result.get("deep_research", {})),
+        "academic_evidence": [_compact_record(record) for record in result.get("academic_evidence", [])[:6]],
+        "adoption_evidence": [_compact_record(record) for record in result.get("adoption_evidence", [])[:6]],
+    }
+
+
+def _compact_record(record: Any) -> dict[str, Any]:
+    if not isinstance(record, dict):
+        return {}
+    fields = (
+        "source_title",
+        "source_url",
+        "citation_count",
+        "subject_raw",
+        "subject_canonical",
+        "relation",
+        "usage_context",
+        "adoption_stage",
+        "technology_raw",
+        "technology_canonical",
+        "use_case_raw",
+        "use_case_canonical",
+        "context_raw",
+        "context_canonical",
+        "expected_value_raw",
+        "expected_value_canonical",
+        "canonical_claim",
+        "evidence_span",
+        "explicit_barriers",
+    )
+    return {field: record[field] for field in fields if record.get(field) not in (None, "", [])}
+
+
+def _compact_deep_research(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        key: value.get(key)
+        for key in ("used", "timed_out", "status", "reason", "review")
+        if value.get(key) not in (None, "", {})
+    }
