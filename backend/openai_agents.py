@@ -35,6 +35,7 @@ class InputPreflightResult(BaseModel):
         "unrecoverable_typo",
         "gibberish",
         "fictional_or_unverifiable",
+        "accepted_recommendation",
     ]
     original_topic: str
     resolved_topic: str
