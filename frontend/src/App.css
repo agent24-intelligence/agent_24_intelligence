@@ -7,8 +7,8 @@
 
 .dev-link {
   position: fixed;
-  right: 16px;
-  bottom: 14px;
+  left: 16px;
+  top: 16px;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.3px;
@@ -30,7 +30,7 @@
 
 .scroll-top-btn {
   position: fixed;
-  left: 16px;
+  right: 16px;
   bottom: 14px;
   width: 40px;
   height: 40px;
@@ -57,7 +57,9 @@
 /* -- 사용자 화면 -- */
 
 .user-view {
-  max-width: 720px;
+  /* 고정 px 대신 화면 폭에 비례하게 — 좁은 창에선 여백이 자연스럽게 줄고,
+     아주 넓은 데모용 모니터에서도 좌우가 텅 비어 보이지 않게 상한만 걸어둠. */
+  width: min(90%, 920px);
   margin: 0 auto;
   padding: 88px 24px 72px;
 }
