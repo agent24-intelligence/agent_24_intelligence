@@ -58,6 +58,15 @@ function ArrowIcon() {
   )
 }
 
+// "이런 기회가 있습니다" 섹션용 반짝임 아이콘.
+function SparkIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4L12 2z" />
+    </svg>
+  )
+}
+
 // 근거 목록 페이지네이션용 좌/우 화살표.
 function ChevronIcon({ direction }) {
   const points = direction === 'left' ? '14 6 8 12 14 18' : '10 6 16 12 10 18'
@@ -387,9 +396,14 @@ export default function UserView() {
       <div className="user-view-intro">
         <span className="user-view-kicker">
           <span className="radar-icon" />
-          Gap Radar
+          Gap Bridge
         </span>
-        <h1>Research-to-Reality Radar</h1>
+        <div className="user-view-title-wrap">
+          <span className="ghost-text" aria-hidden="true">
+            BRIDGE
+          </span>
+          <h1>Bridge Agent</h1>
+        </div>
         <p>
           연구는 많지만, 산업으로 이어지는 기술은 많지 않습니다.
           <br />
@@ -560,6 +574,23 @@ export default function UserView() {
                   items={result.potential_points}
                 />
               )}
+            </div>
+          )}
+
+          {/* 관찰(potential_points)에서 한 단계 더 나가서 "그럼 뭘 만들면 되는지" 실행
+              가능한 제안까지 준다 — 결과 화면에서 가장 실질적인 정보라 포인트 컬러로
+              강조해서 다른 회색 카드들 사이에서 눈에 띄게 한다. */}
+          {result.opportunity_suggestions?.length > 0 && (
+            <div className="user-view-opportunities">
+              <h3 className="opportunities-title">
+                <SparkIcon />
+                이런 기회가 있습니다
+              </h3>
+              <ul className="opportunities-list">
+                {result.opportunity_suggestions.map((text, i) => (
+                  <li key={i}>{text}</li>
+                ))}
+              </ul>
             </div>
           )}
 

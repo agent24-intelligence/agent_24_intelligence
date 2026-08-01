@@ -120,11 +120,36 @@
   }
 }
 
+/* 제목 뒤에 큰 회색 "RADAR" 고스트 텍스트를 깔아서 그래픽적인 느낌을 줌 */
+.user-view-title-wrap {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  overflow: hidden;
+  margin-bottom: 18px;
+}
+
+.ghost-text {
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'Archivo Black', sans-serif;
+  font-size: 90px;
+  color: var(--border);
+  white-space: nowrap;
+  z-index: 0;
+  user-select: none;
+}
+
 .user-view-intro h1 {
-  font-size: 32px;
-  font-weight: 800;
-  letter-spacing: -0.6px;
-  margin: 0 0 18px;
+  position: relative;
+  z-index: 1;
+  font-family: 'Archivo Black', 'Pretendard Variable', sans-serif;
+  font-size: 42px;
+  font-weight: 400;
+  letter-spacing: -0.8px;
+  margin: 0;
   color: var(--text);
 }
 
@@ -571,6 +596,60 @@
   color: var(--text-muted);
   font-size: 13.5px;
   line-height: 1.55;
+}
+
+/* 결과 화면에서 가장 실질적인 정보(실행 가능한 제안)라서 회색 카드들 사이에서
+   포인트 컬러로 확실히 도드라지게 한다 — 다른 카드는 다 무채색인데 여기만 강조 */
+.user-view-opportunities {
+  width: 100%;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin-bottom: 24px;
+}
+
+.opportunities-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--accent-2);
+}
+
+.opportunities-title svg {
+  flex-shrink: 0;
+}
+
+.opportunities-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.opportunities-list li {
+  position: relative;
+  padding-left: 16px;
+  color: var(--text);
+  font-size: 13.5px;
+  line-height: 1.6;
+  font-weight: 500;
+}
+
+.opportunities-list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
 }
 
 /* 찾은 논문/산업 도입 근거 목록 — 추상적인 점수 대신 실제로 확인 가능한 출처를 보여준다 */
