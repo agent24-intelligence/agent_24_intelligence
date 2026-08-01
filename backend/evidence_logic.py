@@ -456,6 +456,8 @@ def classify_final_label(
         return "emerging_adoption"
     if coverage_confidence < LABEL_THRESHOLDS["min_coverage"] or evidence_maturity < LABEL_THRESHOLDS["min_evidence"]:
         return "insufficient_evidence"
+    if adoption_evidence == 0:
+        return "gap_candidate"
     if (
         evidence_maturity >= LABEL_THRESHOLDS["gap_evidence"]
         and adoption_evidence <= LABEL_THRESHOLDS["gap_max_adoption"]

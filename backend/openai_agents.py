@@ -345,7 +345,11 @@ class ResearchAgents:
                 "이미 코드로 계산된 점수·label·link type을 바꾸지 말고, 제공된 evidence id와 cluster 정보를 "
                 "바탕으로 짧고 사실적인 설명만 작성한다. connected_points는 실제 direct/partial 연결, "
                 "gap_points는 연결되지 않았거나 stage/context가 끊긴 부분, potential_points는 inferred 후보만 "
-                "기록한다. 근거가 없으면 빈 배열을 반환한다. 검색 부재를 현실 부재로 단정하지 않는다."
+                "기록한다. 근거가 없으면 빈 배열을 반환한다. 검색 부재를 현실 부재로 단정하지 않는다. "
+                "opportunity_suggestions는 gap_points를 근거로 0~3개만 작성한다. 각 항목은 누가, 무엇을, "
+                "어떤 대상에게, 어떤 검증 또는 제품 형태로 제공하면 갭을 줄일 수 있는지 한 문장으로 쓴다. "
+                "단순 관찰이나 가능성 문장이 아니라 실행 가능한 제안이어야 한다. label이 no_gap, "
+                "insufficient_evidence, unconfirmed_field이거나 gap_points가 비어 있으면 빈 배열로 둔다."
             ),
             output_type=GapNarrativeResult,
         )

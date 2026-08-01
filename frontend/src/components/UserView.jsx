@@ -833,9 +833,8 @@ export default function UserView() {
 
           <AdoptionUseEvidence records={adoptionEvidenceRecords(result)} />
 
-          {/* opportunity_suggestions: 스키마/프롬프트는 준비돼 있지만 지금 파이프라인이
-              결정론적 요약 함수를 쓰고 있어서 실제로는 항상 빈 배열로 온다 — 백엔드 연결이
-              끝나면 바로 뜨도록 UI는 살려둔다. */}
+          {/* opportunity_suggestions: 백엔드 finalization에서 계산된 갭 포인트를 바탕으로
+              실행 가능한 제안이 있을 때만 채워진다. */}
           {result.opportunity_suggestions?.length > 0 && (
             <div className="user-view-opportunities">
               <h3 className="opportunities-title">

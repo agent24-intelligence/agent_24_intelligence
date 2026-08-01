@@ -42,30 +42,6 @@ class PreflightFailure(RuntimeError):
     """The cheap input gate failed, so the expensive pipeline must not run."""
 
 
-_BROAD_TOPIC_RECOMMENDATIONS = [
-    (
-        {"ai", "인공지능", "artificial intelligence"},
-        ["LLM 환각(hallucination) 탐지", "온디바이스 sLLM 양자화", "의료 영상 이상 탐지"],
-    ),
-    (
-        {"llm", "large language model", "large language models", "거대 언어 모델", "거대언어모델", "대규모 언어 모델", "대규모언어모델"},
-        ["LLM 환각(hallucination) 탐지", "온디바이스 sLLM 양자화", "LLM 프롬프트 인젝션 탐지"],
-    ),
-    (
-        {"rag", "retrieval augmented generation", "retrieval-augmented generation"},
-        ["RAG 파이프라인 캐싱 전략", "RAG 검색 결과 재랭킹", "멀티홉 RAG 질의 분해"],
-    ),
-    (
-        {"gnn", "graph neural network", "graph neural networks", "그래프 신경망", "그래프 뉴럴넷"},
-        ["GNN 기반 제품 추천 시스템", "GNN 기반 사기 거래 탐지", "지식 그래프 기반 링크 예측"],
-    ),
-    (
-        {"diffusion model", "diffusion models", "확산 모델", "확산모델"},
-        ["확산 모델 기반 영상 복원 기법", "확산 모델 기반 의료 영상 초해상도", "확산 모델 샘플링 가속 기법"],
-    ),
-]
-
-
 def _normalize_topic_for_gate(value: str) -> str:
     normalized = value.casefold().strip()
     normalized = normalized.replace("(", " ").replace(")", " ").replace("-", " ")
@@ -76,15 +52,42 @@ def _calibrate_broad_resolved_topic(result: InputPreflightResult) -> InputPrefli
     """Catch broad topics even when the model first corrected a typo."""
     if result.status == "rejected":
         return result
-    resolved = _normalize_topic_for_gate(result.resolved_topic or result.original_topic)
-    for aliases, recommendations in _BROAD_TOPIC_RECOMMENDATIONS:
-        if resolved in aliases:
-            result.status = "needs_calibration"
-            result.reason_code = "too_broad"
-            result.message = "입력하신 주제는 범위가 넓어요. 아래 추천 중 하나를 선택하거나 더 구체적으로 입력해 주세요."
-            result.recommendations = recommendations
-            return result
+    topic_for_message = (result.resolved_topic or result.original_topic).strip()
+    resolved = _normalize_topic_for_gate(topic_for_message)
+    if _looks_too_broad_for_demo(resolved):
+        result.status = "needs_calibration"
+        result.reason_code = "too_broad"
+        result.message = "입력하신 주제는 범위가 넓어요. 아래 추천 중 하나를 선택하거나 더 구체적으로 입력해 주세요."
+        result.recommendations = result.recommendations or _broad_topic_recommendations(topic_for_message)
+        return result
     return result
+
+
+def _looks_too_broad_for_demo(topic: str) -> bool:
+    normalized = _normalize_topic_for_gate(topic)
+    tokens = normalized.split()
+    # Hard-gate only obvious short single-token inputs. Multi-token terms often
+    # encode technique + target/use case, so they should be judged by the
+    # preflight model instead of an alias list.
+    if len(tokens) != 1:
+        return False
+    if _contains_hangul(normalized):
+        compact_len = len(normalized.replace(" ", ""))
+        return compact_len <= 6
+    return len(tokens[0]) <= 8
+
+
+def _contains_hangul(value: str) -> bool:
+    return any("\uac00" <= char <= "\ud7a3" for char in value)
+
+
+def _broad_topic_recommendations(topic: str) -> list[str]:
+    topic = topic.strip()
+    return [
+        f"{topic} 적용 대상 성능 지표",
+        f"{topic} 배포 환경 비용 절감",
+        f"{topic} 산업 도입 사례 사용 주체",
+    ]
 
 
 async def _run_preflight(topic: str, runtime: RuntimeConfig = RUNTIME) -> InputPreflightResult:
@@ -208,8 +211,22 @@ async def analyze(request: AnalyzeRequest):
             # the outer timeout can fire first and be misreported as a full-pipeline
             # deadline instead of falling back to the original topic.
             preflight = await _run_preflight(request.topic, request_runtime)
-        if preflight.status in {"rejected", "needs_calibration"}:
+
+        if preflight.status == "rejected":
             return _preflight_response(preflight)
+        if preflight.status == "needs_calibration" and _looks_too_broad_for_demo(preflight.resolved_topic or request.topic):
+            return _preflight_response(preflight)
+        if preflight.status == "needs_calibration":
+            emit_event(
+                "note",
+                {
+                    "text": "입력 주제가 분석 가능해 추천만 참고하고 원문 주제로 파이프라인을 계속 진행합니다.",
+                    "status": preflight.status,
+                    "reason_code": preflight.reason_code,
+                },
+                stage="input_preflight",
+                source="system",
+            )
 
         resolved_topic = preflight.resolved_topic
         pipeline_run = pipeline.run(

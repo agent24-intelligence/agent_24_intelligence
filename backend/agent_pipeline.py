@@ -530,20 +530,34 @@ class ResearchPipeline:
         try:
             batch: AcademicExtractionBatch = await self.agents.academic_extract(source_items, timeout_s=self._stage_timeout("academic_extraction"))
         except AgentBudgetTimeout:
-            emit_event("note", {"text": "학술 근거 구조화 시간 예산이 끝나 검색 결과만으로 잠정 판정합니다."}, stage="academic_extraction", source="system")
-            return [], {"total_relevant_results": len(items), "structured_record_count": 0, "failed_count": len(items), "timed_out": True}
-        except Exception as exc:
+            fallback_records = _fallback_academic_records(source_items, set())
             emit_event(
                 "note",
-                {"text": "학술 근거 구조화 실패 → 검색 결과 원문만 남기고 잠정 판정합니다.", "error": str(exc)},
+                {"text": f"학술 근거 구조화 시간 예산 초과 → Scholar 제목 기반 보조 근거 {len(fallback_records)}건을 반영합니다."},
                 stage="academic_extraction",
                 source="system",
             )
-            return [], {
+            return fallback_records, {
                 "total_relevant_results": len(items),
-                "structured_record_count": 0,
-                "failed_count": len(items),
+                "structured_record_count": len(fallback_records),
+                "failed_count": max(0, len(items) - len(fallback_records)),
+                "timed_out": True,
+                "fallback_count": len(fallback_records),
+            }
+        except Exception as exc:
+            fallback_records = _fallback_academic_records(source_items, set())
+            emit_event(
+                "note",
+                {"text": f"학술 근거 구조화 실패 → Scholar 제목 기반 보조 근거 {len(fallback_records)}건을 반영합니다.", "error": str(exc)},
+                stage="academic_extraction",
+                source="system",
+            )
+            return fallback_records, {
+                "total_relevant_results": len(items),
+                "structured_record_count": len(fallback_records),
+                "failed_count": max(0, len(items) - len(fallback_records)),
                 "error": str(exc),
+                "fallback_count": len(fallback_records),
             }
         records: list[AcademicEvidenceRecord] = []
         for extraction in batch.records:
@@ -580,10 +594,20 @@ class ResearchPipeline:
                     institutions=extraction.institutions,
                 )
             )
+        fallback_records = _fallback_academic_records(source_items, {record.source_id for record in records})
+        if fallback_records and len(records) < min(3, len(source_items)):
+            emit_event(
+                "note",
+                {"text": f"구조화되지 않은 Scholar 결과 {len(fallback_records)}건을 제목 기반 보조 근거로 반영합니다."},
+                stage="academic_extraction",
+                source="system",
+            )
+            records.extend(fallback_records)
         return records, {
             "total_relevant_results": len(items),
             "structured_record_count": len(records),
             "failed_count": max(0, len(items) - len(records)),
+            "fallback_count": len(fallback_records),
             "structured_source_count": len(source_items),
         }
 
@@ -637,6 +661,29 @@ class ResearchPipeline:
             technology_canonical = normalize_text(extraction.technology_canonical or extraction.technology_raw) or None
             subject_canonical = normalize_text(extraction.subject_canonical or extraction.subject_raw) or None
             if not item or not extraction.evidence_span or not technology_canonical or not subject_canonical:
+                rejected_count += 1
+                continue
+            claim_text = " ".join(
+                str(value or "")
+                for value in (
+                    item.get("title"),
+                    item.get("snippet"),
+                    extraction.evidence_span,
+                    extraction.technology_raw,
+                    extraction.use_case_raw,
+                    extraction.context_raw,
+                )
+            )
+            if extraction.relation == "uses" and not _has_query_overlap(item, claim_text):
+                rejected_count += 1
+                continue
+            if extraction.relation == "uses" and _subject_overlaps_query(subject_canonical, item):
+                rejected_count += 1
+                continue
+            if extraction.relation == "uses" and _subject_looks_like_title_fragment(subject_canonical, item):
+                rejected_count += 1
+                continue
+            if extraction.relation == "uses" and not _looks_like_industry_adoption_result(item):
                 rejected_count += 1
                 continue
             if not _has_actionable_adoption_locus(extraction):
@@ -891,7 +938,7 @@ class ResearchPipeline:
                 adoption_breakdown["total"] = adoption_score
             coverage_score = coverage_breakdown["total"]
             gap_types = classify_gap_types(research, cluster_links, adoption_by_id, coverage_score)
-            if adoption_score >= 40:
+            if adoption_score > 0:
                 gap_types = [
                     gap_type
                     for gap_type in gap_types
@@ -1041,16 +1088,56 @@ class ResearchPipeline:
         }
 
     async def _run_gap_narrative(self, analysis: dict[str, Any], research_clusters: list[ResearchCluster], adoption_clusters: list[AdoptionCluster]) -> dict[str, Any]:
-        # 점수와 label은 이미 결정론적으로 계산됐다. 외부 모델을 최종 응답의
-        # critical path에 두면 모델 지연 때문에 결과 자체가 늦어지므로, 설명도
-        # 같은 계산 결과에서 즉시 조합한다.
+        # 점수와 label은 이미 결정론적으로 계산됐다. finalization agent는 그 값을
+        # 바꾸지 않고, 메인 설명 흐름 뒤에 붙일 기회 제안만 보강한다.
         emit_event(
             "note",
             {"text": "최종 설명은 계산된 점수·연결·갭 유형을 바탕으로 정리합니다."},
             stage="finalization",
             source="system",
         )
-        return _deterministic_narrative(analysis)
+        deterministic = _deterministic_narrative(analysis)
+        deterministic["opportunity_suggestions"] = []
+        if not _can_suggest_opportunities(analysis, deterministic):
+            return deterministic
+
+        emit_event(
+            "note",
+            {"text": "점수·라벨은 유지하고 Gap Narrator로 실행 가능한 기회 제안만 보강합니다."},
+            stage="finalization",
+            source="system",
+        )
+        try:
+            model_narrative = await self.agents.gap_narrative(
+                _narrative_agent_payload(analysis, deterministic, research_clusters, adoption_clusters),
+                timeout_s=self._stage_timeout("finalization"),
+            )
+            suggestions = _clean_opportunity_suggestions(model_narrative.opportunity_suggestions)
+            if suggestions:
+                deterministic["opportunity_suggestions"] = suggestions
+                return deterministic
+            emit_event(
+                "note",
+                {"text": "Gap Narrator가 기회 제안을 비워 반환해 계산된 갭 타입으로 보수적 제안을 생성합니다."},
+                stage="finalization",
+                source="system",
+            )
+        except AgentBudgetTimeout:
+            emit_event(
+                "note",
+                {"text": "Gap Narrator 시간 예산이 끝나 계산된 갭 타입으로 기회 제안을 생성합니다."},
+                stage="finalization",
+                source="system",
+            )
+        except Exception as exc:
+            emit_event(
+                "note",
+                {"text": "Gap Narrator 실패 → 계산된 갭 타입으로 기회 제안을 생성합니다.", "error": str(exc)},
+                stage="finalization",
+                source="system",
+            )
+        deterministic["opportunity_suggestions"] = _deterministic_opportunity_suggestions(analysis, deterministic)
+        return deterministic
 
     async def _run_gap_map(self, topic: str, analysis: dict[str, Any], *, max_results: int) -> dict[str, Any]:
         emit_event("note", {"text": "최종 점수와 연구·산업 연결 구조를 Gap Map 시각화로 전달합니다."}, stage="gap_map", source="system")
@@ -1245,6 +1332,49 @@ def _contains_hangul(value: str) -> bool:
     return any("\uac00" <= char <= "\ud7a3" for char in value)
 
 
+def _fallback_academic_records(items: list[dict[str, Any]], existing_source_ids: set[str]) -> list[AcademicEvidenceRecord]:
+    records: list[AcademicEvidenceRecord] = []
+    for item in items:
+        sid = source_id(item)
+        if sid in existing_source_ids:
+            continue
+        title = str(item.get("title") or "").strip()
+        if not title:
+            continue
+        evidence_span = _fallback_evidence_span(item)
+        technology = _fallback_research_technology(title)
+        records.append(
+            AcademicEvidenceRecord(
+                record_id=stable_id("acad_fallback", sid, evidence_span),
+                source_id=sid,
+                source_url=item.get("url") or item.get("link") or "",
+                source_title=title,
+                published_at=item.get("published_at") or item.get("publishedAt"),
+                citation_count=item.get("citationCount"),
+                technology_raw=technology,
+                technology_canonical=normalize_text(technology) or None,
+                use_case_raw=_fallback_use_case(title),
+                use_case_canonical=normalize_text(_fallback_use_case(title)) or None,
+                context_raw=_source_hostname(item),
+                context_canonical=normalize_text(_source_hostname(item)) or None,
+                expected_value_raw=_fallback_expected_value(title),
+                expected_value_canonical=normalize_text(_fallback_expected_value(title)) or None,
+                canonical_claim=title,
+                evidence_span=evidence_span,
+                extraction_confidence=0.58,
+                query_family=item.get("query_family"),
+                is_replication=False,
+                is_synthesis=_mentions_synthesis(title),
+                is_real_world=_mentions_deployment_context(title),
+                is_counter_evidence=False,
+                result_direction="supports" if _mentions_deployment_context(title) else "unclear",
+                institutions=[],
+            )
+        )
+        existing_source_ids.add(sid)
+    return records
+
+
 def _topic_evidence_floor(academic_records: list[Any], scholar_items: list[dict[str, Any]]) -> int:
     structured_source_count = len({record.source_id for record in academic_records if getattr(record, "source_id", None)})
     search_source_count = len({item.get("url") or item.get("title") for item in scholar_items if item.get("url") or item.get("title")})
@@ -1369,7 +1499,7 @@ def _adoption_record_points(record: Any) -> int:
     elif context == "vendor_internal_use":
         points = {"production": 28, "limited_deployment": 16, "pilot": 8, "unknown": 12}.get(stage, 12)
     elif context == "vendor_product_integration":
-        points = {"production": 35, "limited_deployment": 22, "pilot": 12, "unknown": 18}.get(stage, 18)
+        points = {"production": 35, "limited_deployment": 22, "pilot": 12, "unknown": 30}.get(stage, 30)
     else:
         points = 8
 
@@ -1448,7 +1578,11 @@ def _mentions_explicit_adoption_use(text: str) -> bool:
         "production-ready",
         "deployed",
         "deployment",
+        "inference",
         "serving",
+        "performance",
+        "optimization",
+        "engineering",
         "rollout",
         "customer",
         "live system",
@@ -1459,18 +1593,70 @@ def _mentions_explicit_adoption_use(text: str) -> bool:
         "현장 적용",
         "서비스",
         "운용",
+        "추론",
+        "성능",
+        "최적화",
+        "엔지니어링",
         "애플리케이션",
         "어플리케이션",
         "솔루션",
         "플랫폼",
-        "객체탐지",
-        "객체 탐지",
-        "object detection",
         "application",
         "solution",
         "platform",
     )
-    weak_only_markers = ("survey", "overview", "comprehensive study", "tutorial", "day ")
+    weak_only_markers = (
+        "survey",
+        "overview",
+        "comprehensive study",
+        "tutorial",
+        "day ",
+        "patent",
+        "future",
+        "trend",
+        "trends",
+        "philosophy",
+        "theory",
+        "religion",
+        "chapter",
+        "book",
+        "lecture",
+        "course",
+        "encyclopedia",
+        "publisher",
+        "wiki",
+        "what is",
+        "what are",
+        "explained",
+        "guide",
+        "introduction",
+        "how to",
+        "how_to",
+        "특허",
+        "출원",
+        "미래",
+        "트렌드",
+        "전망",
+        "철학",
+        "이론",
+        "종교",
+        "챕터",
+        "장 ",
+        "책",
+        "강의",
+        "강좌",
+        "백과",
+        "출판",
+        "위키",
+        "칼럼",
+        "가이드",
+        "소개",
+        "입문",
+        "무엇인가",
+        "하는 방법",
+        "는 방법",
+        "활용 방법",
+    )
     if any(marker in normalized for marker in required_markers):
         return not any(marker in normalized for marker in weak_only_markers)
     return False
@@ -1481,11 +1667,11 @@ def _looks_like_industry_adoption_result(item: dict[str, Any]) -> bool:
     if not host or _is_non_industry_host(host):
         return False
     text = f"{item.get('title', '')} {item.get('snippet', '')}"
-    if not _mentions_explicit_adoption_use(text):
+    if _is_weak_adoption_claim_text(text):
         return False
-    if not _has_query_overlap(item, text):
-        return False
-    return True
+    if _mentions_explicit_adoption_use(text) and _has_query_overlap(item, text):
+        return True
+    return _looks_like_product_or_service_page(item, text)
 
 
 def _trusted_industry_subject(item: dict[str, Any]) -> str | None:
@@ -1493,7 +1679,7 @@ def _trusted_industry_subject(item: dict[str, Any]) -> str | None:
     if not host or _is_non_industry_host(host):
         return None
     title_subject = _subject_from_title(str(item.get("title") or ""))
-    if title_subject:
+    if title_subject and not _subject_overlaps_query(title_subject, item):
         return title_subject
     if not (
         host.endswith(".com")
@@ -1525,12 +1711,38 @@ def _subject_from_title(title: str) -> str | None:
         candidate = english_match.group(1).strip()
         if not _is_generic_adoption_subject(normalize_text(candidate)):
             return candidate
-    leading_brand = re.match(r"^([A-Z][A-Za-z0-9+.-]{1,24})(?:\s|:|-)", title)
-    if leading_brand:
-        candidate = leading_brand.group(1).strip()
-        if not _is_generic_adoption_subject(normalize_text(candidate)):
-            return candidate
     return None
+
+
+def _subject_looks_like_title_fragment(subject: str, item: dict[str, Any]) -> bool:
+    title = normalize_text(str(item.get("title") or ""))
+    if not title or not subject:
+        return False
+    if not (title == subject or title.startswith(f"{subject} ")):
+        return False
+
+    host_label = normalize_text(_registered_domain_label(_source_hostname(item)))
+    if subject == host_label:
+        return False
+
+    remainder = title[len(subject):].strip()
+    explicit_subject_remainders = (
+        "uses ",
+        "deploys ",
+        "launches ",
+        "introduces ",
+        "announces ",
+        "builds ",
+        "optimizes ",
+        "serves ",
+        "powers ",
+        "가",
+        "이",
+        "은",
+        "는",
+        "에서",
+    )
+    return not any(remainder.startswith(marker) for marker in explicit_subject_remainders)
 
 
 def _registered_domain_label(host: str) -> str:
@@ -1543,8 +1755,7 @@ def _registered_domain_label(host: str) -> str:
 
 
 def _format_subject_label(label: str) -> str:
-    known_acronyms = {"aws", "ibm", "amd", "lg", "kt", "sk", "skt", "nvidia"}
-    if label in known_acronyms:
+    if 2 <= len(label) <= 4 and label.isascii():
         return label.upper()
     return label.replace("-", " ").title()
 
@@ -1555,7 +1766,62 @@ def _has_query_overlap(item: dict[str, Any], text: str) -> bool:
     if not query_tokens:
         return True
     text_normalized = normalize_text(text)
-    return any(token in text_normalized for token in query_tokens)
+    overlap_count = _query_overlap_count(query_tokens, text_normalized)
+    required_count = 1 if len(query_tokens) == 1 else 2
+    return overlap_count >= required_count
+
+
+def _looks_like_product_or_service_page(item: dict[str, Any], text: str) -> bool:
+    title = normalize_text(str(item.get("title") or ""))
+    if not title:
+        return False
+    if not _has_product_or_service_hint(title):
+        return False
+    title_token_count = len(title.split())
+    query_tokens = _meaningful_tokens(str(item.get("query") or ""))
+    if not query_tokens:
+        return False
+    overlap_count = _query_overlap_count(query_tokens, normalize_text(text))
+    return overlap_count >= 2 and title_token_count <= 10
+
+
+def _has_product_or_service_hint(normalized_title: str) -> bool:
+    hints = (
+        "ai",
+        "api",
+        "sdk",
+        "software",
+        "service",
+        "services",
+        "solution",
+        "solutions",
+        "platform",
+        "application",
+        "app",
+        "system",
+        "tool",
+        "tools",
+        "제품",
+        "서비스",
+        "솔루션",
+        "플랫폼",
+        "애플리케이션",
+        "어플리케이션",
+        "시스템",
+        "도구",
+    )
+    return any(hint in normalized_title for hint in hints)
+
+
+def _query_overlap_count(query_tokens: list[str], normalized_text: str) -> int:
+    return sum(1 for token in query_tokens if token in normalized_text)
+
+
+def _subject_overlaps_query(subject: str, item: dict[str, Any]) -> bool:
+    subject_normalized = normalize_text(subject)
+    if not subject_normalized:
+        return False
+    return any(token in subject_normalized for token in _meaningful_tokens(str(item.get("query") or "")))
 
 
 def _meaningful_tokens(text: str) -> list[str]:
@@ -1589,6 +1855,52 @@ def _meaningful_tokens(text: str) -> list[str]:
 
 
 def _is_non_industry_host(host: str) -> bool:
+    host_label = _registered_domain_label(host)
+    media_labels = {
+        "news",
+        "daily",
+        "times",
+        "press",
+        "media",
+        "magazine",
+        "herald",
+        "tribune",
+    }
+    if host_label in media_labels or host_label.endswith(tuple(media_labels)):
+        return True
+    academic_venue_labels = {
+        "neurips",
+        "icml",
+        "iclr",
+        "cvpr",
+        "thecvf",
+        "aclweb",
+        "aclanthology",
+        "aaai",
+        "ijcai",
+        "siggraph",
+    }
+    if host_label in academic_venue_labels:
+        return True
+    generic_blocked_labels = {
+        "news",
+        "journal",
+        "research",
+        "science",
+        "conference",
+        "summit",
+        "proceedings",
+        "paper",
+        "preprint",
+        "publication",
+        "scholar",
+        "openreview",
+        "openaccess",
+        "wiki",
+        "blog",
+    }
+    if any(marker in host or marker in host_label for marker in generic_blocked_labels):
+        return True
     blocked = (
         "arxiv.org",
         "doi.org",
@@ -1649,10 +1961,19 @@ def _fallback_technology(item: dict[str, Any]) -> str | None:
     return candidate[:120] if candidate else None
 
 
+def _fallback_research_technology(title: str) -> str:
+    title = title.strip()
+    if ":" in title:
+        head = title.split(":", 1)[0].strip()
+        if 4 <= len(head) <= 120:
+            return head
+    return title[:120]
+
+
 def _fallback_use_case(text: str) -> str:
     normalized = normalize_text(text)
     if "serving" in normalized:
-        return "LLM serving"
+        return "serving"
     if "inference" in normalized:
         return "inference optimization"
     if "cloud" in normalized:
@@ -1664,6 +1985,21 @@ def _fallback_use_case(text: str) -> str:
     if "현장" in normalized:
         return "현장 적용"
     return "production deployment"
+
+
+def _mentions_synthesis(text: str) -> bool:
+    normalized = normalize_text(text)
+    markers = (
+        "survey",
+        "review",
+        "benchmark",
+        "comprehensive",
+        "동향",
+        "분석",
+        "벤치마크",
+        "비교",
+    )
+    return any(marker in normalized for marker in markers)
 
 
 def _fallback_expected_value(text: str) -> str | None:
@@ -1691,6 +2027,10 @@ def _has_actionable_adoption_locus(extraction: Any) -> bool:
     subject = normalize_text(extraction.subject_canonical or extraction.subject_raw)
     if not subject or _is_generic_adoption_subject(subject):
         return False
+    if _is_weak_adoption_claim_text(getattr(extraction, "evidence_span", None)):
+        return False
+    if _subject_conflicts_with_technical_fields(subject, extraction):
+        return False
 
     if extraction.relation != "uses":
         return extraction.relation == "does_not_use"
@@ -1713,6 +2053,122 @@ def _has_actionable_adoption_locus(extraction: Any) -> bool:
     return True
 
 
+def _is_weak_adoption_claim_text(text: str | None) -> bool:
+    normalized = normalize_text(text)
+    weak_markers = (
+        "patent",
+        "survey",
+        "overview",
+        "review",
+        "tutorial",
+        "future",
+        "trend",
+        "trends",
+        "philosophy",
+        "theory",
+        "religion",
+        "chapter",
+        "book",
+        "lecture",
+        "course",
+        "encyclopedia",
+        "publisher",
+        "wiki",
+        "what is",
+        "what are",
+        "explained",
+        "guide",
+        "introduction",
+        "how to",
+        "how_to",
+        "특허",
+        "출원",
+        "동향",
+        "리뷰",
+        "개요",
+        "튜토리얼",
+        "미래",
+        "트렌드",
+        "전망",
+        "철학",
+        "이론",
+        "종교",
+        "챕터",
+        "책",
+        "강의",
+        "강좌",
+        "백과",
+        "출판",
+        "위키",
+        "칼럼",
+        "가이드",
+        "소개",
+        "입문",
+        "무엇인가",
+        "하는 방법",
+        "는 방법",
+        "활용 방법",
+    )
+    return any(marker in normalized for marker in weak_markers)
+
+
+def _subject_conflicts_with_technical_fields(subject: str, extraction: Any) -> bool:
+    technical_text = " ".join(
+        normalize_text(value)
+        for value in (
+            getattr(extraction, "technology_raw", None),
+            getattr(extraction, "technology_canonical", None),
+            getattr(extraction, "use_case_raw", None),
+            getattr(extraction, "use_case_canonical", None),
+            getattr(extraction, "context_raw", None),
+            getattr(extraction, "context_canonical", None),
+            getattr(extraction, "expected_value_raw", None),
+            getattr(extraction, "expected_value_canonical", None),
+        )
+        if value
+    )
+    if technical_text and _is_subphrase(subject, technical_text):
+        return True
+
+    evidence = normalize_text(getattr(extraction, "evidence_span", None))
+    if evidence and evidence.startswith(subject):
+        remainder = evidence[len(subject):].strip()
+        first_words = tuple(remainder.split()[:2])
+        technical_heads = {
+            "classification",
+            "segmentation",
+            "analysis",
+            "optimization",
+            "technique",
+            "techniques",
+            "method",
+            "methods",
+            "model",
+            "models",
+            "framework",
+            "system",
+            "survey",
+            "review",
+            "분류",
+            "분석",
+            "최적화",
+            "기법",
+            "방법",
+            "모델",
+            "시스템",
+            "동향",
+        }
+        if first_words and first_words[0] in technical_heads:
+            return True
+    return False
+
+
+def _is_subphrase(needle: str, haystack: str) -> bool:
+    if not needle or not haystack:
+        return False
+    return needle == haystack or f" {needle} " in f" {haystack} " or haystack.startswith(f"{needle} ")
+
+
 def _is_generic_adoption_subject(subject: str) -> bool:
     generic_subjects = {
         "ai",
@@ -1730,14 +2186,10 @@ def _is_generic_adoption_subject(subject: str) -> bool:
         "qualitative research",
         "education",
         "students",
-        "marxism",
-        "marxist theory",
-        "marxian political economy",
-        "historical materialism",
-        "dialectical materialism",
-        "critical theory",
         "technology",
         "social structure",
+        "model",
+        "models",
         "공공 서비스",
         "ai 공공 서비스",
         "업무 프로세스",
@@ -1748,13 +2200,9 @@ def _is_generic_adoption_subject(subject: str) -> bool:
         "연구자",
         "교육",
         "학생",
-        "마르크스주의",
-        "마르크스주의 이론",
-        "역사적 물질주의",
-        "변증법적 유물론",
-        "비판 이론",
         "기술",
         "사회 구조",
+        "모델",
     }
     if subject in generic_subjects:
         return True
@@ -1764,12 +2212,30 @@ def _is_generic_adoption_subject(subject: str) -> bool:
         " research",
         " study",
         " studies",
+        " materialism",
+        " ideology",
+        " political economy",
         " 이론",
         " 철학",
         " 연구",
         " 방법론",
+        " 유물론",
+        " 이데올로기",
     )
-    return any(subject.endswith(marker) for marker in generic_markers)
+    if any(subject.endswith(marker) for marker in generic_markers):
+        return True
+
+    academic_concept_markers = (
+        "dialectic",
+        "critical theory",
+        "ontology",
+        "epistemology",
+        "변증법",
+        "비판 이론",
+        "존재론",
+        "인식론",
+    )
+    return any(marker in subject for marker in academic_concept_markers)
 
 
 def _extract_counter_items(result: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1863,6 +2329,119 @@ def _top_analysis(analyses: list[dict[str, Any]]) -> dict[str, Any]:
     if emerging:
         return max(emerging, key=lambda item: item["scores"].get("adoption_evidence", 0))
     return max(analyses, key=lambda item: item["scores"].get("gap_priority", 0))
+
+
+def _can_suggest_opportunities(analysis: dict[str, Any], narrative: dict[str, Any]) -> bool:
+    if analysis.get("label") not in {"gap_candidate", "emerging_adoption"}:
+        return False
+    return bool(narrative.get("gap_points"))
+
+
+def _clean_opportunity_suggestions(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    cleaned = []
+    for value in values:
+        text = " ".join(str(value or "").split())
+        if not text or text in cleaned:
+            continue
+        cleaned.append(text)
+        if len(cleaned) >= 3:
+            break
+    return cleaned
+
+
+def _short_phrase(value: Any, fallback: str) -> str:
+    text = " ".join(str(value or "").split())
+    return text or fallback
+
+
+def _compact_narrative_link(link: dict[str, Any]) -> dict[str, Any]:
+    fields = (
+        "link_type",
+        "technology_match",
+        "use_case_match",
+        "context_match",
+        "expected_value_match",
+        "matched_on",
+        "missing_on",
+        "explanation",
+        "confidence",
+    )
+    return {field: link[field] for field in fields if link.get(field) not in (None, "", [])}
+
+
+def _narrative_agent_payload(
+    analysis: dict[str, Any],
+    deterministic: dict[str, Any],
+    research_clusters: list[ResearchCluster],
+    adoption_clusters: list[AdoptionCluster],
+) -> dict[str, Any]:
+    linked_adoption_ids = {
+        link.get("adoption_cluster_id")
+        for link in analysis.get("links", [])
+        if isinstance(link, dict) and link.get("adoption_cluster_id")
+    }
+    return {
+        "task": "Return concise Korean narrative fields. Keep label, scores, gap_types, and link_type unchanged.",
+        "locked": {
+            "label": analysis.get("label"),
+            "scores": analysis.get("scores", {}),
+            "gap_types": analysis.get("gap_types", []),
+        },
+        "computed_narrative": deterministic,
+        "research_cluster": analysis.get("research_cluster", {}),
+        "linked_research_clusters": [
+            _cluster_summary(cluster)
+            for cluster in research_clusters
+            if cluster.cluster_id == analysis.get("research_cluster_id")
+        ],
+        "linked_adoption_clusters": [
+            _cluster_summary(cluster)
+            for cluster in adoption_clusters
+            if cluster.cluster_id in linked_adoption_ids
+        ][:5],
+        "links": [_compact_narrative_link(link) for link in analysis.get("links", [])[:5] if isinstance(link, dict)],
+        "candidate_connections": analysis.get("candidate_connections", [])[:5],
+        "rules": [
+            "Do not change scores, label, gap_types, or link_type.",
+            "Only create opportunity_suggestions when computed_narrative.gap_points is non-empty.",
+            "Keep opportunity_suggestions concrete: product/service form, target user, and validation action.",
+        ],
+    }
+
+
+def _deterministic_opportunity_suggestions(analysis: dict[str, Any], narrative: dict[str, Any]) -> list[str]:
+    if not _can_suggest_opportunities(analysis, narrative):
+        return []
+    cluster = analysis.get("research_cluster") or {}
+    technology = _short_phrase(cluster.get("technology"), "해당 기술")
+    use_case = _short_phrase(cluster.get("use_case"), "해당 사용 사례")
+    context = _short_phrase(cluster.get("context"), "대상 산업 환경")
+    expected_value = _short_phrase(cluster.get("expected_value"), "운영 성과")
+    gap_types = set(analysis.get("gap_types") or [])
+
+    suggestions = []
+
+    def add(text: str) -> None:
+        if text not in suggestions:
+            suggestions.append(text)
+
+    if gap_types & {"no_adoption_link", "possible_no_adoption_link"}:
+        add(f"{technology}의 {use_case} 학술 근거를 {context} 담당 팀이 시험할 수 있는 검증 패키지로 제공하면 직접 도입 사례가 없는 갭을 확인할 수 있습니다.")
+    if "stage_gap" in gap_types:
+        add(f"파일럿·제한 운영 단계의 {technology} 적용 사례를 대상으로 {expected_value} 운영 지표를 수집하는 전환 리포트를 제공하면 정식 운영 근거 부족을 줄일 수 있습니다.")
+    if "context_gap" in gap_types:
+        add(f"{context} 환경에 맞춘 {technology} 적용 벤치마크를 {use_case} 담당 조직에 제공하면 연구 조건과 산업 맥락 차이를 검증할 수 있습니다.")
+    if "technology_substitution" in gap_types:
+        add(f"{use_case}를 이미 다른 기술로 처리하는 조직에 {technology} 비교 평가 도구를 제공하면 대체 기술 대비 적용 가능성을 검증할 수 있습니다.")
+    if "barrier_gap" in gap_types:
+        add(f"{technology} 도입 장벽을 기준으로 보안·비용·운영 체크리스트를 만든 뒤 {use_case} 담당 팀에 사전 진단 서비스로 제공할 수 있습니다.")
+    if "outcome_gap" in gap_types:
+        add(f"{technology} 적용 전후의 {expected_value}를 같은 기준으로 측정하는 성과 검증 대시보드를 제공하면 연구 효과와 운영 결과 차이를 확인할 수 있습니다.")
+    if not suggestions:
+        add(f"{technology}의 {use_case} 학술 근거와 산업 검색에서 비어 있는 조건을 묶어 {context} 대상 검증 과제로 제안할 수 있습니다.")
+    return _clean_opportunity_suggestions(suggestions)
 
 
 def _deterministic_narrative(analysis: dict[str, Any]) -> dict[str, Any]:
