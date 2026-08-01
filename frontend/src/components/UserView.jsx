@@ -24,6 +24,17 @@ const LABEL_TEXT = {
   over_adopted: '과잉 적용',
 }
 
+// 결과 라벨을 의미에 맞는 톤으로 구분한다 (앰버 = 갭 시그널, 그린 = 해소/정리됨,
+// 레드 = 반대 방향 경고, 슬레이트 = 판단 보류) — 사용자가 한눈에 결과 성격을 읽도록.
+const LABEL_TONE = {
+  gap_candidate: 'label-gap',
+  weak_gap_candidate: 'label-weak',
+  insufficient_evidence: 'label-neutral',
+  unconfirmed_field: 'label-neutral',
+  no_gap: 'label-resolved',
+  over_adopted: 'label-alert',
+}
+
 export default function UserView() {
   const [topic, setTopic] = useState('')
   const [status, setStatus] = useState('idle') // idle | running | done | error
@@ -72,6 +83,10 @@ export default function UserView() {
   return (
     <div className="user-view">
       <div className="user-view-intro">
+        <span className="user-view-kicker">
+          <span className="radar-icon" />
+          Gap Radar
+        </span>
         <h1>Research-to-Reality Radar</h1>
         <p>주제 하나를 입력하면 학계-산업 간 적용 갭을 근거와 함께 정리합니다.</p>
       </div>
@@ -114,7 +129,9 @@ export default function UserView() {
             </div>
           </div>
 
-          <div className="user-view-label">{LABEL_TEXT[result.label] || result.label}</div>
+          <div className={`user-view-label ${LABEL_TONE[result.label] || 'label-neutral'}`}>
+            {LABEL_TEXT[result.label] || result.label}
+          </div>
           {result.rationale && <p className="user-view-rationale">{result.rationale}</p>}
 
           {artifact?.html && (
