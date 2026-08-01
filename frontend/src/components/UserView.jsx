@@ -183,7 +183,7 @@ export default function UserView() {
           Gap Radar
         </span>
         <h1>Research-to-Reality Radar</h1>
-        <p>기술 하나만 입력하세요. 논문엔 있는데 아직 현장엔 없는 부분을 찾아드려요.</p>
+        <p>기술 하나를 입력하면, 학계 연구와 산업 적용 사이의 격차를 분석합니다.</p>
       </div>
 
       <form className="user-view-form" onSubmit={runAnalyze}>
