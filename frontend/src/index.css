@@ -1,9 +1,50 @@
 :root {
-  color-scheme: light;
+  color-scheme: dark;
   font: 15px/1.6 'Pretendard Variable', 'Pretendard', system-ui, 'Segoe UI', Roboto, sans-serif;
 
-  /* -- 완전 무채색 -- 색으로 고민하지 않도록 흑백/회색 명암만으로 강조를 준다
-     (Vercel/Linear 다크모드류 미니멀 톤). "포인트 컬러"도 짙은 블랙 하나로 처리. */
+  /* -- 완전 무채색 다크 (기본값) -- 색으로 고민하지 않도록 흑백/회색 명암만으로
+     강조를 준다. "포인트 컬러"도 흰색 하나로 처리 — 연구-산업 "격차 분석" 도구라는
+     정체성에 맞춰 장식색 없이 대비로만 위계를 준다. [data-theme='light']에서
+     같은 원칙을 라이트로 뒤집는다 — 토글은 UserView의 테마 버튼으로 전환. */
+  --bg: #141416;
+  --surface: #1e1f22;
+  --surface-2: #1a1b1e;
+  --border: #2a2b2e;
+  --text: #f4f4f2;
+  --text-muted: #8a8b90;
+
+  --accent: #f4f4f2;
+  --accent-2: #ffffff;
+  --accent-soft: #232427;
+  --accent-glow: rgba(244, 244, 242, 0.14);
+
+  /* 기능적 상태색 (브랜드 포인트와 별개, 관용적 의미로만 최소 사용) — 다크 배경에서도
+     충분한 대비가 나오도록 밝은 톤으로 조정 */
+  --red: #e2726c;
+  --red-soft: #2a1614;
+  --green: #8ec9a0;
+  --green-soft: #16231a;
+  --slate: #8a8b90;
+  --slate-soft: #232427;
+
+  /* 코드 안에 하드코딩돼 있던 라이트 전용 색들도 테마 토큰으로 뽑아서
+     다크/라이트 전환에 같이 따라오게 함 */
+  --score-low: #55565b;
+  --error-border: #4a2420;
+  --stop-hover-bg: #ec8983;
+  --dev-hover-bg: #2c2d31;
+  --logo-invert: 1;
+
+  --mono: ui-monospace, 'SF Mono', Consolas, monospace;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 6px 18px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.4);
+  --radius: 12px;
+  --content-width: 1180px;
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+
   --bg: #fafafa;
   --surface: #ffffff;
   --surface-2: #f4f4f4;
@@ -16,7 +57,6 @@
   --accent-soft: #eeeeee;
   --accent-glow: rgba(0, 0, 0, 0.14);
 
-  /* 기능적 상태색 (브랜드 포인트와 별개, 관용적 의미로만 최소 사용) */
   --red: #c0362c;
   --red-soft: #f8ebe9;
   --green: #4b7a5c;
@@ -24,11 +64,14 @@
   --slate: #6f6f6f;
   --slate-soft: #eeeeee;
 
-  --mono: ui-monospace, 'SF Mono', Consolas, monospace;
+  --score-low: #b3b3b3;
+  --error-border: #f5c6c6;
+  --stop-hover-bg: #9c2c24;
+  --dev-hover-bg: #e0e0e0;
+  --logo-invert: 0;
+
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 6px 18px rgba(0, 0, 0, 0.05);
   --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.08);
-  --radius: 12px;
-  --content-width: 1180px;
 }
 
 * {

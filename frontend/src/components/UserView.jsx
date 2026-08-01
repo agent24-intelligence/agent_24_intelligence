@@ -116,6 +116,32 @@ function BoltIcon() {
   )
 }
 
+// 다크/라이트 전환 버튼 아이콘 — 지금이 다크면 "누르면 밝아진다"는 뜻으로 해,
+// 지금이 라이트면 "누르면 어두워진다"는 뜻으로 달을 보여준다.
+function SunIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="4.5" />
+      <line x1="12" y1="1.5" x2="12" y2="4" />
+      <line x1="12" y1="20" x2="12" y2="22.5" />
+      <line x1="1.5" y1="12" x2="4" y2="12" />
+      <line x1="20" y1="12" x2="22.5" y2="12" />
+      <line x1="4.5" y1="4.5" x2="6.2" y2="6.2" />
+      <line x1="17.8" y1="17.8" x2="19.5" y2="19.5" />
+      <line x1="4.5" y1="19.5" x2="6.2" y2="17.8" />
+      <line x1="17.8" y1="6.2" x2="19.5" y2="4.5" />
+    </svg>
+  )
+}
+
+function MoonIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.8 6.8 0 0 0 10.5 10.5Z" />
+    </svg>
+  )
+}
+
 // result.scholar = { totalCount, results: [...], searches: [...] } — 학술 검색으로 찾은
 // 논문 목록. 항목마다 title/url/citationCount 등이 있을 수도 없을 수도 있어 방어적으로 읽는다.
 function scholarItems(result) {
@@ -254,6 +280,21 @@ function useScrollPastTop(threshold = 400) {
     return () => window.removeEventListener('scroll', onScroll)
   }, [threshold])
   return past
+}
+
+// 다크/라이트 전환. <html data-theme="..">에 반영해서 index.css의 :root(다크)와
+// [data-theme='light'] 토큰 세트가 자동으로 갈아끼워지게 하고, 선택은
+// localStorage에 저장해 새로고침해도 유지되게 한다.
+function useTheme() {
+  const [theme, setTheme] = useState(() => {
+    if (typeof window === 'undefined') return 'dark'
+    return window.localStorage.getItem('bridge-agent-theme') || 'dark'
+  })
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    window.localStorage.setItem('bridge-agent-theme', theme)
+  }, [theme])
+  return [theme, setTheme]
 }
 
 export default function UserView() {
@@ -422,6 +463,7 @@ export default function UserView() {
   }
 
   const showScrollTop = useScrollPastTop()
+  const [theme, setTheme] = useTheme()
   const showPreflightGuidance = status === 'done' && result && result.status !== 'completed'
   const preflightGuidanceMessage =
     result?.status === 'needs_calibration'
@@ -432,6 +474,15 @@ export default function UserView() {
 
   return (
     <div className={`user-view${status === 'idle' ? ' is-centered' : ''}`}>
+      <button
+        type="button"
+        className="theme-toggle-btn"
+        onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+        aria-label={theme === 'dark' ? '라이트 모드로 전환' : '다크 모드로 전환'}
+        title={theme === 'dark' ? '라이트 모드로 전환' : '다크 모드로 전환'}
+      >
+        {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
+      </button>
       {showScrollTop && (
         <button
           type="button"

@@ -54,6 +54,33 @@
   transform: translateY(-2px);
 }
 
+/* 다크/라이트 토글 — scroll-top-btn과 같은 자리 언어(원형 고스트 버튼), 반대편
+   위쪽 구석에 둬서 dev-link(좌상단)/scroll-top-btn(우하단)과 겹치지 않게 한다. */
+.theme-toggle-btn {
+  position: fixed;
+  right: 16px;
+  top: 16px;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  opacity: 0.85;
+  z-index: 5;
+  transition: opacity 0.15s ease, transform 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.theme-toggle-btn:hover {
+  opacity: 1;
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: translateY(-2px);
+}
+
 /* -- 사용자 화면 -- */
 
 .user-view {
@@ -93,7 +120,7 @@
   margin-bottom: 8px;
   white-space: nowrap;
   background: var(--text);
-  color: #fff;
+  color: var(--bg);
   font-size: 11.5px;
   font-weight: 600;
   padding: 5px 10px;
@@ -143,7 +170,7 @@
 .user-view-fast-btn.is-on {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--bg);
 }
 
 .user-view-fast-btn.is-on:hover:not(:disabled) {
@@ -158,7 +185,7 @@
 
 .user-view-intro {
   text-align: center;
-  margin-bottom: 52px;
+  margin-bottom: 64px;
 }
 
 /* 로고 마크 — kicker 배지, dev 헤더 등 작은 자리에 씀 */
@@ -167,6 +194,8 @@
   height: 14px;
   flex-shrink: 0;
   display: block;
+  /* 로고 PNG가 검정 실루엣이라 다크 배경에선 반전시켜 흰색으로 보이게 함 */
+  filter: invert(var(--logo-invert));
 }
 
 /* 제목 뒤에 로고 심볼을 크고 옅게 깔아서 그래픽적인 느낌을 줌 (배지+고스트 텍스트 대체).
@@ -190,6 +219,7 @@
   z-index: 0;
   pointer-events: none;
   user-select: none;
+  filter: invert(var(--logo-invert));
 }
 
 .user-view-intro h1 {
@@ -277,7 +307,7 @@
   height: 48px;
   background: var(--accent);
   border: none;
-  color: #fff;
+  color: var(--bg);
   border-radius: 12px;
   transition: background 0.12s ease, transform 0.12s ease;
 }
@@ -292,7 +322,9 @@
 }
 
 .user-view-icon-btn.is-stop:hover {
-  background: #9c2c24;
+  /* 다크 배경에서는 호버 시 어둡게 하는 대신 살짝 밝게 — 어두운 배경 위에서
+     더 어두워지면 텍스트 대비가 오히려 나빠진다 */
+  background: var(--stop-hover-bg);
   transform: none;
 }
 
@@ -333,6 +365,7 @@
   width: 18px;
   height: 18px;
   opacity: 0.45;
+  filter: invert(var(--logo-invert));
   animation: spin 1.1s linear infinite;
 }
 
@@ -349,7 +382,7 @@
   gap: 10px;
   color: var(--red);
   background: var(--red-soft);
-  border: 1px solid #f5c6c6;
+  border: 1px solid var(--error-border);
   border-radius: var(--radius);
   padding: 16px;
   text-align: left;
@@ -588,7 +621,9 @@
    높을수록 진한 포인트 컬러(블랙)로. 색상(hue)이 아니라 명도(lightness)로만 구분해서
    "무채색+포인트 하나" 원칙은 그대로 유지한다. */
 .score-value.score-low {
-  color: #b3b3b3;
+  /* 다크 배경에선 "옅다"는 신호가 밝은 회색이 아니라 배경에 가까운 어두운
+     회색이어야 낮은 점수처럼 덜 도드라져 보인다 */
+  color: var(--score-low);
 }
 
 .score-value.score-mid {
@@ -857,6 +892,7 @@
 .pager-logo-icon {
   height: 12px;
   width: auto;
+  filter: invert(var(--logo-invert));
 }
 
 .evidence-pager button:hover:not(:disabled) {
@@ -1022,7 +1058,7 @@
 
 .clean-link:hover {
   border-color: var(--accent);
-  background: #e0e0e0;
+  background: var(--dev-hover-bg);
 }
 
 main {
@@ -1296,7 +1332,7 @@ main {
 .api-tester button {
   background: var(--accent);
   border: none;
-  color: #fff;
+  color: var(--bg);
   font-weight: 600;
   padding: 8px 18px;
   border-radius: 8px;
@@ -1378,7 +1414,7 @@ main {
 .gap-map-error {
   color: var(--red);
   background: var(--red-soft);
-  border: 1px solid #e5c3c0;
+  border: 1px solid var(--error-border);
   border-radius: 10px;
   padding: 16px;
 }

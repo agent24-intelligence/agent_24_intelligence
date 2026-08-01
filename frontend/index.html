@@ -16,6 +16,16 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Sora:wght@800&display=swap" rel="stylesheet" />
     <title>Bridge Agent — AGENT:24</title>
+    <script>
+      // React가 마운트되기 전에 저장된 테마를 먼저 적용해서, 라이트를 선택해둔
+      // 상태로 새로고침했을 때 다크가 잠깐 번쩍였다 바뀌는 걸 막는다.
+      (function () {
+        try {
+          var saved = window.localStorage.getItem('bridge-agent-theme')
+          if (saved) document.documentElement.setAttribute('data-theme', saved)
+        } catch (e) {}
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
