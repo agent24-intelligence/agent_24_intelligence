@@ -68,10 +68,11 @@
   justify-content: flex-start;
 }
 
-/* 결과가 아직 없는 첫 화면(입력 전/타이핑 중)에서는 화면 세로 중앙에 오게 하고,
-   제출해서 진행/결과가 생기는 순간부터는 위에서부터 쌓이는 일반 흐름으로 되돌린다.
-   그래야 결과가 길어져도 어색하게 재정렬되지 않는다. */
-.user-view.is-idle {
+/* 입력 전/타이핑 중일 때만 화면 세로 중앙에 오게 하고, 제출하는 순간(진행 중 포함)
+   바로 위 정렬로 전환한다. 구글 검색창처럼 전환이 "제출 시점 딱 한 번"만 일어나야
+   자연스럽다 — running도 중앙에 두면 idle→running, running→done 두 번 재배치돼서
+   더 산만해진다. */
+.user-view.is-centered {
   justify-content: center;
   padding-top: 24px;
   padding-bottom: 24px;

@@ -431,7 +431,7 @@ export default function UserView() {
         : result?.message
 
   return (
-    <div className={`user-view${status === 'idle' ? ' is-idle' : ''}`}>
+    <div className={`user-view${status === 'idle' ? ' is-centered' : ''}`}>
       {showScrollTop && (
         <button
           type="button"
