@@ -2488,6 +2488,7 @@ def _deterministic_narrative(analysis: dict[str, Any]) -> dict[str, Any]:
         if missing:
             potential_points.append(f"추가 확인이 필요한 차원: {', '.join(missing)}.")
     potential_points = list(dict.fromkeys(potential_points))
+    inferred_barriers = _deterministic_inferred_barriers(analysis)
 
     return {
         "rationale": (
@@ -2500,4 +2501,45 @@ def _deterministic_narrative(analysis: dict[str, Any]) -> dict[str, Any]:
         "connected_points": connected_points[:5],
         "gap_points": list(dict.fromkeys(gap_points))[:5],
         "potential_points": potential_points[:5],
+        "inferred_barriers": inferred_barriers,
     }
+
+
+def _deterministic_inferred_barriers(analysis: dict[str, Any]) -> list[str]:
+    cluster = analysis.get("research_cluster") or {}
+    technology = _short_phrase(cluster.get("technology"), "해당 기술")
+    use_case = _short_phrase(cluster.get("use_case"), "해당 사용 사례")
+    context = _short_phrase(cluster.get("context"), "대상 환경")
+    expected_value = _short_phrase(cluster.get("expected_value"), "기대 성과")
+    gap_types = set(analysis.get("gap_types") or [])
+    barriers: list[str] = []
+
+    def add(text: str) -> None:
+        text = " ".join(str(text or "").split())
+        if text and text not in barriers:
+            barriers.append(text)
+
+    for text in analysis.get("inferred_barriers") or []:
+        add(text)
+
+    if "no_adoption_link" in gap_types:
+        add(f"검색 범위 안에서 {technology}을(를) {use_case}에 직접 적용한 산업 주체를 확인하지 못했습니다.")
+    if "possible_no_adoption_link" in gap_types:
+        add(f"{technology}의 산업 도입 여부를 판단할 공개 근거가 부족해 원인을 확정하기 어렵습니다.")
+    if "stage_gap" in gap_types:
+        add(f"확인된 산업 사례가 파일럿·제한 운영 단계에 머물러 {expected_value} 기준의 정식 운영 검증이 부족합니다.")
+    if "context_gap" in gap_types:
+        add(f"연구 조건과 확인된 산업 사례의 배포 환경·사용 맥락이 달라 {context}에서 그대로 쓰인다고 보기 어렵습니다.")
+    if "technology_substitution" in gap_types:
+        add(f"산업에서는 {use_case}를 다른 기술로 처리하는 사례가 있어 {technology} 채택 필요성이 낮을 수 있습니다.")
+    if "barrier_gap" in gap_types and not analysis.get("confirmed_barriers"):
+        add(f"도입 중단·거절 신호는 있으나 공개 자료에서 구체적인 장벽 항목은 제한적으로 확인됩니다.")
+    if "outcome_gap" in gap_types:
+        add(f"운영 결과가 연구에서 기대한 {expected_value}와 일치하지 않아 현장 재현성이 장벽일 수 있습니다.")
+
+    for candidate in analysis.get("candidate_connections", [])[:2]:
+        missing = candidate.get("missing_dimensions") or candidate.get("required_validation") or []
+        if missing:
+            add(f"추가 연결 후보는 {', '.join(missing)} 차원이 비어 있어 같은 조건의 산업 적용으로 확정할 수 없습니다.")
+
+    return barriers[:5]
