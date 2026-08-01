@@ -137,6 +137,36 @@ function scoreTone(value) {
   return 'score-low'
 }
 
+function judgmentSummary(result) {
+  const maturity = result?.scores?.evidence_maturity
+  const adoption = result?.scores?.adoption_evidence
+  const links = result?.gap_candidate?.links || result?.links || []
+  const directCount = links.filter((link) => link.link_type === 'direct').length
+  const partialCount = links.filter((link) => link.link_type === 'partial').length
+
+  const maturityText =
+    typeof maturity === 'number' && maturity < 40
+      ? '이번 검색에서 확인된 구조화 근거가 제한적'
+      : typeof maturity === 'number' && maturity < 70
+        ? '이번 검색에서 일부 확인된 상태'
+        : '이번 검색에서 충분히 확인된 상태'
+  const adoptionText =
+    typeof adoption === 'number' && adoption < 20
+      ? '강하게 확인되지 않았습니다'
+      : typeof adoption === 'number' && adoption < 60
+        ? '일부 확인됐습니다'
+        : '여러 사례에서 확인됐습니다'
+
+  let connectionText = '직접 연결되는 산업 사례는 확인되지 않아 추가 검증이 필요합니다.'
+  if (directCount > 0) {
+    connectionText = `직접 연결 ${directCount}건이 확인됐습니다.`
+  } else if (partialCount > 0) {
+    connectionText = `인접한 부분 연결 ${partialCount}건이 있으나 추가 검증이 필요합니다.`
+  }
+
+  return `연구 근거는 ${maturityText}이고, 실제 산업 도입은 ${adoptionText}. ${connectionText}`
+}
+
 // 검색엔진 결과처럼 링크 밑에 출처 도메인을 보여주기 위한 호스트명 추출.
 function hostnameOf(url) {
   try {
@@ -599,7 +629,7 @@ export default function UserView() {
 
           <div className="user-view-scores">
             <div className={`score-card ${scoreTone(result.scores?.evidence_maturity)}`}>
-              <span className="score-label">연구는 얼마나 진행됐나</span>
+              <span className="score-label">검색된 연구 근거는 얼마나 충분한가</span>
               <span className={`score-value ${scoreTone(result.scores?.evidence_maturity)}`}>
                 {typeof result.scores?.evidence_maturity === 'number' ? `${result.scores.evidence_maturity}%` : '-'}
               </span>
@@ -631,20 +661,25 @@ export default function UserView() {
             </div>
           )}
 
-          {result.gap_candidate?.score_breakdown && (
-            <div className="score-breakdown">
-              <span className="score-breakdown-label">계산 근거</span>
-              <div className="score-breakdown-list">
-                {Object.entries(result.gap_candidate.score_breakdown).map(([name, breakdown]) => (
-                  <span key={name} className="score-breakdown-item">
-                    {name.replaceAll('_', ' ')} {breakdown.total}/100
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
+          <p className="judgment-summary">{judgmentSummary(result)}</p>
 
-          {result.rationale && <p className="user-view-rationale">{result.rationale}</p>}
+          {(result.gap_candidate?.score_breakdown || result.rationale) && (
+            <details className="score-breakdown">
+              <summary className="score-breakdown-toggle">
+                <span className="score-breakdown-label">계산 근거</span>
+              </summary>
+              {result.rationale && <p className="score-breakdown-rationale">{result.rationale}</p>}
+              {result.gap_candidate?.score_breakdown && (
+                <div className="score-breakdown-list">
+                  {Object.entries(result.gap_candidate.score_breakdown).map(([name, breakdown]) => (
+                    <span key={name} className="score-breakdown-item">
+                      {name.replaceAll('_', ' ')} {breakdown.total}/100
+                    </span>
+                  ))}
+                </div>
+              )}
+            </details>
+          )}
 
           {/* 판정 설명(라벨/점수/rationale)과 그 아래 보조 설명 묶음을 구분선으로 나눈다 —
               전부 텍스트/카드가 이어 붙어있으면 어디까지가 "판정"이고 어디부터가

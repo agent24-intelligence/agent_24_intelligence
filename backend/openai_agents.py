@@ -239,9 +239,12 @@ class ResearchAgents:
                 "실제 산업에서 쓰이는 동의어를 최대 3개 제시한다. 확실하지 않은 직역은 "
                 "mapping_confidence를 낮춘다. query_families에는 technology, use_case, context "
                 "세 검색 관점별 용어를 넣고, 확인되지 않은 용어는 만들지 않는다. "
-                "technology에는 기술·모델 계열, use_case에는 실제로 해결하는 업무나 제품 기능, "
+                "technology에는 기술·모델 계열, use_case에는 입력 주제와 같은 실제 업무나 제품 기능, "
                 "context에는 산업·배포 환경을 넣는다. 단순 상위 개념만 반복하지 말고 산업 도입 "
-                "사례 검색에 쓸 수 있는 구체적 표현을 우선한다."
+                "사례 검색에 쓸 수 있는 구체적 표현을 우선한다. 입력이 음악 장르 분류라면 "
+                "use_case는 automatic music genre classification 또는 audio genre tagging처럼 "
+                "분류 작업 자체를 유지한다. music recommendation, playlist curation, "
+                "similar-song retrieval은 인접 사용 사례이므로 use_case를 대체하는 용어로 쓰지 않는다."
             ),
             output_type=VocabularyBridgeResult,
         )
@@ -274,7 +277,8 @@ class ResearchAgents:
                 "실제로 존재해야 한다. 검색 결과 부재를 does_not_use로 바꾸지 않는다. "
                 "공식 기술 블로그, 엔지니어링 블로그, 기업 연구소 글, 사례 연구가 자사 시스템의 "
                 "production, rollout, serving, online A/B test, customer deployment, live system을 "
-                "직접 설명하면 실제 도입 증거로 본다."
+                "직접 설명하면 실제 도입 증거로 본다. 추천, 검색, 큐레이션 사례는 장르 분류기가 "
+                "실제로 사용됐다는 문장이 없으면 음악 장르 분류의 도입 증거로 추출하지 않는다."
             ),
             output_type=AdoptionExtractionBatch,
         )
@@ -286,6 +290,8 @@ class ResearchAgents:
                 "차원으로 비교한다. 각 값은 반드시 1.0(동일), 0.5(관련되나 조건이 다름), 0.0(다르거나 "
                 "판단 불가) 중 하나다. 최종 link_type, similarity, 점수, label은 반환하지 않는다. "
                 "근거가 충분하지 않으면 0.0과 낮은 confidence를 반환한다. "
+                "music genre classification과 music recommendation은 use_case가 다르다. "
+                "이 경우 use_case_match는 0.5 이하로 두고 direct 연결로 볼 수 없게 한다. "
                 "학술 검색 결과와 산업 검색 결과를 대조해 적용 갭 후보를 판정한다. "
                 "연구 성숙도, 산업 도입 증거, 검색 커버리지를 분리해서 평가하고, "
                 "근거가 부족하면 억지로 gap_candidate를 만들지 않는다. "
