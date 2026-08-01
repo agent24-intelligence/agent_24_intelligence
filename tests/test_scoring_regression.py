@@ -26,11 +26,19 @@ except ModuleNotFoundError:
     sys.modules["agents"] = _agents
 
 from agent_pipeline import (  # noqa: E402
+    _deterministic_inferred_barriers,
+    _fallback_academic_records,
     _fallback_adoption_records,
+    _filter_search_result_by_topic_anchor_terms,
+    _has_query_overlap,
     _is_non_industry_host,
+    _is_weak_adoption_claim_text,
     _looks_like_industry_adoption_result,
+    _mentions_explicit_adoption_use,
     _source_hostname,
     _subject_overlaps_query,
+    _text_matches_topic_anchor_terms,
+    _topic_anchor_terms,
     _trusted_industry_subject,
 )
 from evidence_logic import (  # noqa: E402
@@ -194,3 +202,68 @@ def test_subject_extraction_keeps_operator_subject_and_rejects_query_as_subject(
 def test_broad_gate_calibrates_ai_without_a_topic_alias_allowlist():
     assert looks_too_broad_for_demo("AI") is True
     assert looks_too_broad_for_demo("LLM 양자화") is False
+
+
+def test_multi_acronym_topic_requires_every_acronym_in_visible_evidence():
+    anchors = _topic_anchor_terms("SSM과 LLM의 통합 설계 방법론")
+    assert anchors == ("ssm", "llm")
+
+    llm_only = {
+        "url": "https://msap.ai/example",
+        "title": "MSA가 LLM 기반 지능형 업무 시스템 확산을 촉진",
+        "snippet": "유연한 서비스 구조에 AI를 결합하여 LLM 기반 업무 시스템을 구축합니다.",
+        "query": "SSM과 LLM의 통합 설계 방법론 산업 적용 사례",
+    }
+    anchored = {
+        "url": "https://acme.com/case-study/ssm-llm",
+        "title": "Acme uses SSM and LLM in production design workflows",
+        "snippet": "Acme deployed an SSM and LLM integration for production design validation.",
+        "query": "SSM LLM production deployment",
+    }
+
+    assert _text_matches_topic_anchor_terms(f"{llm_only['title']} {llm_only['snippet']}", anchors) is False
+    assert _text_matches_topic_anchor_terms(f"{anchored['title']} {anchored['snippet']}", anchors) is True
+
+    filtered, filtered_count = _filter_search_result_by_topic_anchor_terms({"results": [llm_only, anchored]}, anchors)
+    assert filtered_count == 1
+    assert filtered["results"] == [anchored]
+
+    assert _fallback_adoption_records([llm_only], set(), topic_anchor_terms=anchors) == []
+    anchored_text = f"{anchored['title']} {anchored['snippet']}"
+    assert _is_non_industry_host(_source_hostname(anchored)) is False
+    assert _is_weak_adoption_claim_text(anchored_text) is False
+    assert _mentions_explicit_adoption_use(anchored_text) is True
+    assert _has_query_overlap(anchored, anchored_text) is True
+    assert _looks_like_industry_adoption_result(anchored) is True
+    assert _trusted_industry_subject(anchored) == "Acme"
+    assert len(_fallback_adoption_records([anchored], set(), topic_anchor_terms=anchors)) == 1
+
+
+def test_multi_acronym_topic_rejects_academic_evidence_that_drops_one_anchor():
+    anchors = _topic_anchor_terms("SSM과 LLM의 통합 설계 방법론")
+    llm_only_paper = {
+        "url": "https://aisel.aisnet.org/example",
+        "title": "Integrating Large Language Models into Systems Analysis and Design Education",
+        "snippet": "A project-based curriculum framework for LLM education.",
+        "query": "SSM과 LLM의 통합 설계 방법론",
+    }
+
+    assert _fallback_academic_records([llm_only_paper], set(), topic_anchor_terms=anchors) == []
+
+
+def test_no_gap_analysis_does_not_turn_candidate_dimensions_into_barriers():
+    analysis = {
+        "label": "no_gap",
+        "gap_types": [],
+        "research_cluster": {
+            "technology": "tested technology",
+            "use_case": "tested use case",
+            "context": "tested context",
+            "expected_value": "tested value",
+        },
+        "candidate_connections": [
+            {"missing_dimensions": ["use_case", "context"], "required_validation": ["use_case", "context"]}
+        ],
+    }
+
+    assert _deterministic_inferred_barriers(analysis) == []

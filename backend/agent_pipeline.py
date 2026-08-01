@@ -55,6 +55,7 @@ class ResearchPipeline:
         self.agents = agents or ResearchAgents()
         self.deadline = deadline
         self.last_partial_result: dict[str, Any] | None = None
+        self.topic_anchor_terms: tuple[str, ...] = ()
 
     async def run(
         self,
@@ -66,6 +67,7 @@ class ResearchPipeline:
     ) -> dict[str, Any]:
         self.deadline = self.deadline or AnalysisDeadline(self.runtime.total_timeout_s)
         self.last_partial_result = None
+        self.topic_anchor_terms = _topic_anchor_terms(topic)
         max_results = min(max_results, self.runtime.max_search_results)
 
         scope = await self._calibrate_scope(topic)
@@ -74,6 +76,14 @@ class ResearchPipeline:
 
         scholar_queries, query_generations = await self._build_scholar_queries(topic, scope, scholar_query)
         scholar = await self._run_scholar_scout(scholar_queries, max_results=max_results)
+        scholar, scholar_filtered = _filter_search_result_by_topic_anchor_terms(scholar, self.topic_anchor_terms)
+        if scholar_filtered:
+            emit_event(
+                "note",
+                {"text": f"원문 핵심 약어가 빠진 Scholar 결과 {scholar_filtered}건을 제외했습니다.", "topic_anchor_terms": list(self.topic_anchor_terms)},
+                stage="scholar_scout",
+                source="system",
+            )
         scholar_items = _tag_items(scholar.get("results", []), "academic")
 
         academic_task = asyncio.create_task(self._extract_academic_records(scholar_items))
@@ -107,6 +117,14 @@ class ResearchPipeline:
         vocabulary = await vocabulary_task
         query_specs = self._build_adoption_query_specs(topic, vocabulary, adoption_queries)
         adoption = await self._run_adoption_scout(query_specs, max_results=max_results)
+        adoption, adoption_filtered = _filter_search_responses_by_topic_anchor_terms(adoption, self.topic_anchor_terms)
+        if adoption_filtered:
+            emit_event(
+                "note",
+                {"text": f"원문 핵심 약어가 빠진 산업 검색 결과 {adoption_filtered}건을 제외했습니다.", "topic_anchor_terms": list(self.topic_anchor_terms)},
+                stage="adoption_scout",
+                source="system",
+            )
         adoption_items = _tag_items(_flatten_results(adoption), "adoption")
         adoption_records, adoption_extraction_meta = await self._extract_adoption_records(adoption_items)
         adoption_records = deduplicate_records(adoption_records)
@@ -175,7 +193,15 @@ class ResearchPipeline:
         if run_counter:
             counter_result = await self._run_adversarial_verifier(counter_query)
             counter_items = _extract_counter_items(counter_result)
-            counter_evidence = _extract_counter_evidence(counter_result)
+            counter_items, counter_filtered = _filter_items_by_topic_anchor_terms(counter_items, self.topic_anchor_terms)
+            if counter_filtered:
+                emit_event(
+                    "note",
+                    {"text": f"원문 핵심 약어가 빠진 반증 검색 결과 {counter_filtered}건을 제외했습니다.", "topic_anchor_terms": list(self.topic_anchor_terms)},
+                    stage="adversarial_verifier",
+                    source="system",
+                )
+            counter_evidence = [{"kind": "reference", **item} for item in counter_items]
             counter_records, counter_meta = await self._extract_adoption_records(counter_items)
         else:
             emit_event("note", {"text": counter_reason}, stage="adversarial_verifier", source="system")
@@ -245,6 +271,14 @@ class ResearchPipeline:
         deep_target_id = top_candidate.get("research_cluster_id")
         deep_research = await self._run_conditional_deep_research(topic, top_candidate, counter_evidence)
         deep_items = deep_research.pop("adoption_items", [])
+        deep_items, deep_filtered = _filter_items_by_topic_anchor_terms(deep_items, self.topic_anchor_terms)
+        if deep_filtered:
+            emit_event(
+                "note",
+                {"text": f"원문 핵심 약어가 빠진 Deep Research 검색 근거 {deep_filtered}건을 제외했습니다.", "topic_anchor_terms": list(self.topic_anchor_terms)},
+                stage="conditional_deep_research",
+                source="system",
+            )
         deep_record_dicts = deep_research.pop("adoption_records", [])
         if deep_record_dicts:
             deep_records = [AdoptionEvidenceRecord.model_validate(item) for item in deep_record_dicts]
@@ -371,6 +405,14 @@ class ResearchPipeline:
             stage="scholar_scout",
             source="system",
         )
+        if _topic_anchor_terms(topic):
+            emit_event(
+                "note",
+                {"text": "복수 약어가 있는 주제라 원문 핵심 약어를 보존한 Scholar 쿼리를 사용합니다."},
+                stage="scholar_scout",
+                source="system",
+            )
+            return [topic], [{"query": topic, "rationale": "복수 약어 주제에서 핵심 약어 누락을 막기 위해 원문 주제를 사용합니다."}]
         generated = []
         # One focused Scholar query is enough for the live demo. Running all
         # three scope suggestions concurrently caused Liner 429 responses and
@@ -530,7 +572,7 @@ class ResearchPipeline:
         try:
             batch: AcademicExtractionBatch = await self.agents.academic_extract(source_items, timeout_s=self._stage_timeout("academic_extraction"))
         except AgentBudgetTimeout:
-            fallback_records = _fallback_academic_records(source_items, set())
+            fallback_records = _fallback_academic_records(source_items, set(), topic_anchor_terms=self.topic_anchor_terms)
             emit_event(
                 "note",
                 {"text": f"학술 근거 구조화 시간 예산 초과 → Scholar 제목 기반 보조 근거 {len(fallback_records)}건을 반영합니다."},
@@ -545,7 +587,7 @@ class ResearchPipeline:
                 "fallback_count": len(fallback_records),
             }
         except Exception as exc:
-            fallback_records = _fallback_academic_records(source_items, set())
+            fallback_records = _fallback_academic_records(source_items, set(), topic_anchor_terms=self.topic_anchor_terms)
             emit_event(
                 "note",
                 {"text": f"학술 근거 구조화 실패 → Scholar 제목 기반 보조 근거 {len(fallback_records)}건을 반영합니다.", "error": str(exc)},
@@ -565,6 +607,20 @@ class ResearchPipeline:
                 continue
             item = source_items[extraction.source_index] if extraction.source_index < len(source_items) else None
             if not item or not extraction.evidence_span or not extraction.technology_canonical:
+                continue
+            claim_text = " ".join(
+                str(value or "")
+                for value in (
+                    item.get("title"),
+                    item.get("snippet"),
+                    extraction.evidence_span,
+                    extraction.technology_raw,
+                    extraction.use_case_raw,
+                    extraction.context_raw,
+                    extraction.expected_value_raw,
+                )
+            )
+            if not _text_matches_topic_anchor_terms(claim_text, self.topic_anchor_terms):
                 continue
             records.append(
                 AcademicEvidenceRecord(
@@ -594,7 +650,7 @@ class ResearchPipeline:
                     institutions=extraction.institutions,
                 )
             )
-        fallback_records = _fallback_academic_records(source_items, {record.source_id for record in records})
+        fallback_records = _fallback_academic_records(source_items, {record.source_id for record in records}, topic_anchor_terms=self.topic_anchor_terms)
         if fallback_records and len(records) < min(3, len(source_items)):
             emit_event(
                 "note",
@@ -619,7 +675,7 @@ class ResearchPipeline:
         try:
             batch: AdoptionExtractionBatch = await self.agents.adoption_extract(source_items, timeout_s=self._stage_timeout("adoption_extraction"))
         except AgentBudgetTimeout:
-            fallback_records = _fallback_adoption_records(source_items, set())
+            fallback_records = _fallback_adoption_records(source_items, set(), topic_anchor_terms=self.topic_anchor_terms)
             if fallback_records:
                 emit_event(
                     "note",
@@ -637,7 +693,7 @@ class ResearchPipeline:
                 "fallback_count": len(fallback_records),
             }
         except Exception as exc:
-            fallback_records = _fallback_adoption_records(source_items, set())
+            fallback_records = _fallback_adoption_records(source_items, set(), topic_anchor_terms=self.topic_anchor_terms)
             emit_event(
                 "note",
                 {"text": f"산업 도입 근거 구조화 실패 → 명시적 운영 신호 {len(fallback_records)}건을 보조 근거로 반영합니다.", "error": str(exc)},
@@ -675,6 +731,9 @@ class ResearchPipeline:
                 )
             )
             if extraction.relation == "uses" and not _has_query_overlap(item, claim_text):
+                rejected_count += 1
+                continue
+            if extraction.relation == "uses" and not _text_matches_topic_anchor_terms(claim_text, self.topic_anchor_terms):
                 rejected_count += 1
                 continue
             if extraction.relation == "uses" and _subject_overlaps_query(subject_canonical, item):
@@ -721,7 +780,7 @@ class ResearchPipeline:
                     explicit_barriers=extraction.explicit_barriers,
                 )
             )
-        fallback_records = _fallback_adoption_records(source_items, {record.source_id for record in records})
+        fallback_records = _fallback_adoption_records(source_items, {record.source_id for record in records}, topic_anchor_terms=self.topic_anchor_terms)
         if fallback_records:
             emit_event(
                 "note",
@@ -1340,7 +1399,89 @@ def _contains_hangul(value: str) -> bool:
     return any("\uac00" <= char <= "\ud7a3" for char in value)
 
 
-def _fallback_academic_records(items: list[dict[str, Any]], existing_source_ids: set[str]) -> list[AcademicEvidenceRecord]:
+def _topic_anchor_terms(topic: str) -> tuple[str, ...]:
+    """Return exact topic anchors that must survive query rewriting.
+
+    Keep this intentionally narrow. The production issue came from a topic with
+    multiple short acronyms where query generation dropped one of them. For
+    ordinary one-acronym or Korean-only topics, synonym expansion should still
+    be handled by the model/search pipeline.
+    """
+    anchors: list[str] = []
+    seen: set[str] = set()
+    for value in re.findall(r"(?<![A-Za-z0-9])([A-Z]{2,})(?![A-Za-z0-9])", topic or ""):
+        key = normalize_text(value)
+        if key and key not in seen:
+            seen.add(key)
+            anchors.append(key)
+    return tuple(anchors) if len(anchors) >= 2 else ()
+
+
+def _contains_topic_anchor(normalized_text: str, anchor: str) -> bool:
+    if not normalized_text or not anchor:
+        return False
+    if anchor.isascii():
+        return bool(re.search(rf"(?<![a-z0-9]){re.escape(anchor)}s?(?![a-z0-9])", normalized_text))
+    return anchor in normalized_text
+
+
+def _text_matches_topic_anchor_terms(text: str, topic_anchor_terms: tuple[str, ...] = ()) -> bool:
+    if not topic_anchor_terms:
+        return True
+    normalized = normalize_text(text)
+    return all(_contains_topic_anchor(normalized, anchor) for anchor in topic_anchor_terms)
+
+
+def _item_topic_anchor_text(item: dict[str, Any]) -> str:
+    return " ".join(
+        str(item.get(field) or "")
+        for field in (
+            "title",
+            "snippet",
+            "description",
+            "summary",
+            "content",
+            "text",
+        )
+    )
+
+
+def _item_matches_topic_anchor_terms(item: dict[str, Any], topic_anchor_terms: tuple[str, ...] = ()) -> bool:
+    return _text_matches_topic_anchor_terms(_item_topic_anchor_text(item), topic_anchor_terms)
+
+
+def _filter_items_by_topic_anchor_terms(items: list[dict[str, Any]], topic_anchor_terms: tuple[str, ...] = ()) -> tuple[list[dict[str, Any]], int]:
+    if not topic_anchor_terms:
+        return items, 0
+    filtered = [item for item in items if _item_matches_topic_anchor_terms(item, topic_anchor_terms)]
+    return filtered, len(items) - len(filtered)
+
+
+def _filter_search_result_by_topic_anchor_terms(response: dict[str, Any], topic_anchor_terms: tuple[str, ...] = ()) -> tuple[dict[str, Any], int]:
+    if not topic_anchor_terms:
+        return response, 0
+    results, filtered_count = _filter_items_by_topic_anchor_terms(list(response.get("results", [])), topic_anchor_terms)
+    if filtered_count == 0:
+        return response, 0
+    updated = dict(response)
+    updated["results"] = results
+    updated["totalCount"] = len(results)
+    return updated, filtered_count
+
+
+def _filter_search_responses_by_topic_anchor_terms(responses: list[dict[str, Any]], topic_anchor_terms: tuple[str, ...] = ()) -> tuple[list[dict[str, Any]], int]:
+    if not topic_anchor_terms:
+        return responses, 0
+    filtered_responses: list[dict[str, Any]] = []
+    total_filtered = 0
+    for response in responses:
+        updated, filtered_count = _filter_search_result_by_topic_anchor_terms(response, topic_anchor_terms)
+        filtered_responses.append(updated)
+        total_filtered += filtered_count
+    return filtered_responses, total_filtered
+
+
+def _fallback_academic_records(items: list[dict[str, Any]], existing_source_ids: set[str], *, topic_anchor_terms: tuple[str, ...] = ()) -> list[AcademicEvidenceRecord]:
     records: list[AcademicEvidenceRecord] = []
     for item in items:
         sid = source_id(item)
@@ -1350,6 +1491,8 @@ def _fallback_academic_records(items: list[dict[str, Any]], existing_source_ids:
         if not title:
             continue
         evidence_span = _fallback_evidence_span(item)
+        if not _text_matches_topic_anchor_terms(evidence_span, topic_anchor_terms):
+            continue
         technology = _fallback_research_technology(title)
         records.append(
             AcademicEvidenceRecord(
@@ -1445,13 +1588,15 @@ def _topic_adoption_floor(adoption_records: list[Any]) -> int:
     return total
 
 
-def _fallback_adoption_records(items: list[dict[str, Any]], existing_source_ids: set[str]) -> list[AdoptionEvidenceRecord]:
+def _fallback_adoption_records(items: list[dict[str, Any]], existing_source_ids: set[str], *, topic_anchor_terms: tuple[str, ...] = ()) -> list[AdoptionEvidenceRecord]:
     records: list[AdoptionEvidenceRecord] = []
     for item in items:
         sid = source_id(item)
         if sid in existing_source_ids:
             continue
         text = f"{item.get('title', '')} {item.get('snippet', '')}"
+        if not _text_matches_topic_anchor_terms(text, topic_anchor_terms):
+            continue
         if not _looks_like_industry_adoption_result(item):
             continue
         subject = _trusted_industry_subject(item)
@@ -2512,6 +2657,8 @@ def _deterministic_inferred_barriers(analysis: dict[str, Any]) -> list[str]:
     context = _short_phrase(cluster.get("context"), "대상 환경")
     expected_value = _short_phrase(cluster.get("expected_value"), "기대 성과")
     gap_types = set(analysis.get("gap_types") or [])
+    if analysis.get("label") == "no_gap" or not gap_types:
+        return []
     barriers: list[str] = []
 
     def add(text: str) -> None:
