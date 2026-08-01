@@ -268,6 +268,8 @@ def calculate_adoption_evidence(
     by_org: dict[str, list[tuple[str, float]]] = defaultdict(list)
     cluster_scores: dict[str, float] = {}
     direct_production_orgs: set[str] = set()
+    partial_production_orgs: set[str] = set()
+    connected_orgs: set[str] = set()
     for link in links:
         if link.adoption_cluster_id is None or link.link_type not in {"direct", "partial"}:
             continue
@@ -282,8 +284,11 @@ def calculate_adoption_evidence(
             points = stage_points.get(cluster.max_stage_attained or "unknown", 0)
         cluster_scores[cluster.cluster_id] = max(cluster_scores.get(cluster.cluster_id, 0), points)
         by_org[cluster.subject].append((cluster.cluster_id, float(points)))
+        connected_orgs.add(cluster.subject)
         if link.link_type == "direct" and cluster.max_stage_attained == "production":
             direct_production_orgs.add(cluster.subject)
+        if link.link_type == "partial" and cluster.max_stage_attained == "production":
+            partial_production_orgs.add(cluster.subject)
 
     organization_scores: dict[str, float] = {}
     for subject, scores in by_org.items():
@@ -306,11 +311,15 @@ def calculate_adoption_evidence(
             "breadth_bonus": breadth_bonus,
             "final_user_orgs": final_user_orgs,
             "direct_production_orgs": len(direct_production_orgs),
+            "partial_production_orgs": len(partial_production_orgs),
+            "connected_orgs": len(connected_orgs),
         },
         "details": {
             "cluster_scores": cluster_scores,
             "organization_scores": organization_scores,
             "direct_production_orgs": sorted(direct_production_orgs),
+            "partial_production_orgs": sorted(partial_production_orgs),
+            "connected_orgs": sorted(connected_orgs),
         },
     }
 
@@ -326,13 +335,16 @@ def calculate_coverage_confidence(
     adversarial_performed: bool,
     adversarial_timed_out: bool,
     adversarial_result_count: int,
+    adversarial_skipped_with_adoption: bool = False,
 ) -> dict[str, Any]:
     scholar = min(unique_academic_sources / 5, 1.0) * 20
     web = min(unique_web_sources / 8, 1.0) * 20
     query = min(query_family_count, QUERY_FAMILY_MAX) / QUERY_FAMILY_MAX * 15
     mapping = max(0.0, min(mapping_confidence, 1.0)) * 15
     extraction = 0 if total_relevant_results == 0 else structured_record_count / total_relevant_results * 10
-    if not adversarial_performed:
+    if adversarial_skipped_with_adoption:
+        adversarial = 20
+    elif not adversarial_performed:
         adversarial = 0
     elif adversarial_timed_out:
         adversarial = 5
@@ -362,6 +374,7 @@ def calculate_coverage_confidence(
             "adversarial_performed": adversarial_performed,
             "adversarial_timed_out": adversarial_timed_out,
             "adversarial_result_count": adversarial_result_count,
+            "adversarial_skipped_with_adoption": adversarial_skipped_with_adoption,
         },
     }
 
@@ -415,6 +428,8 @@ def classify_final_label(
         return "unconfirmed_field"
     if adoption_evidence >= LABEL_THRESHOLDS["no_gap_adoption"] or direct_production_org_count >= LABEL_THRESHOLDS["no_gap_direct_production_orgs"]:
         return "no_gap"
+    if adoption_evidence > 0:
+        return "emerging_adoption"
     if coverage_confidence < LABEL_THRESHOLDS["min_coverage"] or evidence_maturity < LABEL_THRESHOLDS["min_evidence"]:
         return "insufficient_evidence"
     if (

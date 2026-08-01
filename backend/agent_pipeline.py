@@ -154,11 +154,24 @@ class ResearchPipeline:
             reason="학술·산업 근거를 확보하고 1차 점수까지 계산했습니다.",
         )
 
-        counter_query = self._counter_query(topic, top_candidate)
-        counter_result = await self._run_adversarial_verifier(counter_query)
-        counter_items = _extract_counter_items(counter_result)
-        counter_evidence = _extract_counter_evidence(counter_result)
-        counter_records, counter_meta = await self._extract_adoption_records(counter_items)
+        run_counter, counter_reason = self._should_run_adversarial_verifier(
+            top_candidate=top_candidate,
+            adoption_records=adoption_records,
+            links=links,
+        )
+        counter_query = self._counter_query(topic, top_candidate) if run_counter else ""
+        if run_counter:
+            counter_result = await self._run_adversarial_verifier(counter_query)
+            counter_items = _extract_counter_items(counter_result)
+            counter_evidence = _extract_counter_evidence(counter_result)
+            counter_records, counter_meta = await self._extract_adoption_records(counter_items)
+        else:
+            emit_event("note", {"text": counter_reason}, stage="adversarial_verifier", source="system")
+            counter_result = {"events": [], "timed_out": False, "skipped": True, "reason": counter_reason}
+            counter_items = []
+            counter_evidence = []
+            counter_records = []
+            counter_meta = {"total_relevant_results": 0, "structured_record_count": 0, "failed_count": 0, "skipped": True}
         if counter_records:
             adoption_records = deduplicate_records([*adoption_records, *counter_records])
             adoption_clusters = build_adoption_clusters(adoption_records, limit=MAX_ADOPTION_CLUSTERS)
@@ -179,7 +192,8 @@ class ResearchPipeline:
             structured_record_count=len(academic_records) + len(adoption_records),
             total_relevant_results=academic_extraction_meta["total_relevant_results"] + adoption_extraction_meta["total_relevant_results"] + counter_meta["total_relevant_results"],
             adversarial={
-                "performed": True,
+                "performed": run_counter,
+                "skipped_with_adoption": bool(counter_result.get("skipped")),
                 "timed_out": _agent_search_failed(counter_result),
                 "result_count": len({item.get("url") or item.get("title") for item in counter_items if item.get("url") or item.get("title")}),
             },
@@ -203,7 +217,7 @@ class ResearchPipeline:
             analyses=analyses,
             top_candidate=top_candidate,
             counter_evidence=counter_evidence,
-            reason="반증 검색까지 반영한 잠정 판정입니다.",
+            reason="반증 검색까지 반영한 잠정 판정입니다." if run_counter else counter_reason,
         )
 
         deep_target_id = top_candidate.get("research_cluster_id")
@@ -231,7 +245,8 @@ class ResearchPipeline:
                 structured_record_count=len(academic_records) + len(adoption_records),
                 total_relevant_results=academic_extraction_meta["total_relevant_results"] + adoption_extraction_meta["total_relevant_results"] + counter_meta["total_relevant_results"] + len(deep_items),
                 adversarial={
-                    "performed": True,
+                    "performed": run_counter,
+                    "skipped_with_adoption": bool(counter_result.get("skipped")),
                     "timed_out": _agent_search_failed(counter_result),
                     "result_count": len({item.get("url") or item.get("title") for item in [*counter_items, *deep_items] if item.get("url") or item.get("title")}),
                 },
@@ -756,6 +771,7 @@ class ResearchPipeline:
             adversarial_performed=bool(adversarial and adversarial.get("performed")),
             adversarial_timed_out=bool(adversarial and adversarial.get("timed_out")),
             adversarial_result_count=int((adversarial or {}).get("result_count", 0)),
+            adversarial_skipped_with_adoption=bool(adversarial and adversarial.get("skipped_with_adoption")),
         )
 
     def _evaluate_all(self, research_clusters: list[ResearchCluster], adoption_clusters: list[AdoptionCluster], links: list[ClusterLink], coverage: dict[str, Any], field_not_confirmed: bool) -> list[dict[str, Any]]:
@@ -825,6 +841,29 @@ class ResearchPipeline:
             source="system",
         )
         return analyses
+
+    def _should_run_adversarial_verifier(
+        self,
+        *,
+        top_candidate: dict[str, Any],
+        adoption_records: list[Any],
+        links: list[ClusterLink],
+    ) -> tuple[bool, str]:
+        research_id = top_candidate.get("research_cluster_id")
+        candidate_links = [link for link in links if link.research_cluster_id == research_id]
+        connected_links = [link for link in candidate_links if link.link_type in {"direct", "partial"}]
+        blocked_links = [link for link in candidate_links if link.link_type == "blocked"]
+        relations = {record.relation for record in adoption_records if getattr(record, "relation", None)}
+
+        if "uses" in relations and "does_not_use" in relations:
+            return True, "도입 증거와 중단·거절 증거가 함께 있어 반증 검색으로 모순을 확인합니다."
+        if connected_links:
+            return False, "1차 산업 검색에서 연결 가능한 도입 근거를 확인해 반증 검색을 생략합니다."
+        if blocked_links:
+            return True, "도입 중단·거절 근거만 확인되어 반증 검색으로 현재 도입 여부를 다시 확인합니다."
+        if adoption_records:
+            return True, "산업 도입 후보는 있으나 상위 연구 클러스터와 연결되지 않아 동일 사용 사례 도입 여부를 재확인합니다."
+        return True, "1차 산업 검색에서 연결 가능한 도입 근거가 없어 반증 검색을 수행합니다."
 
     async def _run_adversarial_verifier(self, counter_query: str) -> dict[str, Any]:
         emit_event("note", {"text": "갭을 선언하기 전에 동일한 사용 사례·환경에서 이미 운영 중이라는 반증을 검색합니다."}, stage="adversarial_verifier", source="system")
@@ -1172,6 +1211,12 @@ def _top_analysis(analyses: list[dict[str, Any]]) -> dict[str, Any]:
             "deep_research_reasons": [],
             "research_cluster": {},
         }
+    no_gap = [item for item in analyses if item.get("label") == "no_gap"]
+    if no_gap:
+        return max(no_gap, key=lambda item: item["scores"].get("adoption_evidence", 0))
+    emerging = [item for item in analyses if item.get("label") == "emerging_adoption"]
+    if emerging:
+        return max(emerging, key=lambda item: item["scores"].get("adoption_evidence", 0))
     return max(analyses, key=lambda item: item["scores"].get("gap_priority", 0))
 
 

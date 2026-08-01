@@ -26,7 +26,7 @@ const STAGE_LABEL = {
 // 소개 문구("~분석합니다")와 톤을 맞춰서 정중체(합니다체)로 통일.
 const LABEL_TEXT = {
   gap_candidate: '아직 산업 현장에 적용되지 않았습니다',
-  emerging_adoption: '산업 적용이 초기 단계입니다',
+  emerging_adoption: '산업 적용이 일부 확인됐습니다',
   insufficient_evidence: '판단할 근거가 아직 부족합니다',
   unconfirmed_field: '입력한 분야를 다시 확인해주세요',
   no_gap: '이미 산업에 도입되어 있습니다',
@@ -712,7 +712,7 @@ export default function UserView() {
                 )}
                 {adoption.length > 0 && (
                   <EvidenceGroup
-                    title="찾은 산업 도입 근거"
+                    title="찾은 산업 검색 결과"
                     items={adoption}
                     page={evidencePage.adoption}
                     onPageChange={(p) => setEvidencePage((v) => ({ ...v, adoption: p }))}
