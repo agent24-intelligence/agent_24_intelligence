@@ -413,8 +413,14 @@ class ResearchPipeline:
         technologies = _clean_terms(families.get("technology", [])) or _clean_terms(vocabulary.terms)
         use_cases = _clean_terms(families.get("use_case", []))
         contexts = _clean_terms(families.get("context", []))
+        korean_input = _contains_hangul(" ".join([*technologies, *use_cases, *contexts, *map(str, vocabulary.terms or [])]))
 
         specs: list[tuple[str, str]] = []
+        if korean_input and technologies and use_cases:
+            specs.append((f"{technologies[0]} {use_cases[0]} 산업 적용 사례", "technology+use_case"))
+            specs.append((f"{technologies[0]} {use_cases[0]} 상용 서비스", "technology+use_case"))
+        if korean_input and technologies and contexts:
+            specs.append((f"{technologies[0]} {contexts[0]} 현장 적용", "technology+context"))
         if technologies and use_cases:
             specs.append((f"{technologies[0]} {use_cases[0]} production deployment", "technology+use_case"))
         if technologies and len(use_cases) > 1:
@@ -432,7 +438,10 @@ class ResearchPipeline:
                 specs.append((f"{technology} {context} real-world implementation", "technology+context"))
 
         if not specs:
-            specs = [(f"{term} production deployment case study", "technology") for term in _clean_terms(vocabulary.terms)]
+            if korean_input:
+                specs = [(f"{term} 도입 사례 현장 적용", "technology") for term in _clean_terms(vocabulary.terms)]
+            else:
+                specs = [(f"{term} production deployment case study", "technology") for term in _clean_terms(vocabulary.terms)]
         if not specs:
             specs = [(term, "technology") for term in _clean_terms(families.get("technology", []))]
         return list(dict.fromkeys(specs))[: self.runtime.max_adoption_queries]
@@ -1125,6 +1134,10 @@ def _clean_terms(values: Any) -> list[str]:
         seen.add(key)
         terms.append(term)
     return terms
+
+
+def _contains_hangul(value: str) -> bool:
+    return any("\uac00" <= char <= "\ud7a3" for char in value)
 
 
 def _extract_counter_items(result: dict[str, Any]) -> list[dict[str, Any]]:
