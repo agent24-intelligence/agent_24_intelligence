@@ -2,8 +2,10 @@
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field, field_validator
+from starlette.responses import JSONResponse
 
 from agent_pipeline import run_pipeline
+from events import emit_event
 
 router = APIRouter()
 
@@ -25,9 +27,21 @@ class AnalyzeRequest(BaseModel):
 
 @router.post("/api/analyze")
 async def analyze(request: AnalyzeRequest):
-    return await run_pipeline(
-        request.topic,
-        scholar_query=request.scholar_query,
-        adoption_queries=request.adoption_queries,
-        max_results=request.max_results,
-    )
+    try:
+        return await run_pipeline(
+            request.topic,
+            scholar_query=request.scholar_query,
+            adoption_queries=request.adoption_queries,
+            max_results=request.max_results,
+        )
+    except Exception as exc:
+        emit_event(
+            "error",
+            {"name": "analyze", "topic": request.topic, "message": str(exc)},
+            stage="pipeline",
+            source="system",
+        )
+        return JSONResponse(
+            status_code=500,
+            content={"error": "analyze_failed", "message": str(exc)},
+        )
