@@ -210,22 +210,27 @@ class LinerClient:
             headers["Accept"] = "text/event-stream"
 
         events: list[dict[str, Any]] = []
+
+        async def _consume(response: httpx.Response) -> None:
+            async for line in response.aiter_lines():
+                event = _parse_sse_line(line)
+                if event is None:
+                    continue
+                events.append(event)
+                event_type = event.get("type")
+                if event_type:
+                    emit_event(event_type, event, stage=stage, source="liner")
+                else:
+                    emit_event("sse_line", event, stage=stage, source="liner")
+
         try:
             async with httpx.AsyncClient(timeout=None) as client:
                 async with client.stream("POST", url, headers=headers, json=body) as response:
                     response.raise_for_status()
-                    async with asyncio.timeout(timeout_s):
-                        async for line in response.aiter_lines():
-                            event = _parse_sse_line(line)
-                            if event is None:
-                                continue
-                            events.append(event)
-                            event_type = event.get("type")
-                            if event_type:
-                                emit_event(event_type, event, stage=stage, source="liner")
-                            else:
-                                emit_event("sse_line", event, stage=stage, source="liner")
-        except TimeoutError:
+                    # asyncio.timeout() requires Python 3.11+; wait_for() works on 3.10 too,
+                    # which is what ships on some team members' machines.
+                    await asyncio.wait_for(_consume(response), timeout=timeout_s)
+        except (asyncio.TimeoutError, TimeoutError):
             emit_event(
                 "error",
                 {
